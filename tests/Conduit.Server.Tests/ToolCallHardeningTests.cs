@@ -233,7 +233,7 @@ public class ToolCallHardeningTests
     }
 
     [Fact]
-    public async Task Usage_is_summed_over_attempts()
+    public async Task Usage_reports_the_final_prompt_size_and_all_output_tokens()
     {
         static string Usage(int input, int output) => new JsonObject
         {
@@ -245,7 +245,7 @@ public class ToolCallHardeningTests
             ? [Line("<tool_call>{\"name\":\"bash\",\"arguments\":{}}</tool_call>"), Usage(100, 10)]
             : [Line("<tool_call>{\"name\":\"bash\",\"arguments\":{\"command\":\"ls\",\"description\":\"d\"}}</tool_call>"), Usage(150, 20)]);
         var usage = events.OfType<UsageEvent>().Single();
-        Assert.Equal((250, 30), (usage.PromptTokens, usage.CompletionTokens));
+        Assert.Equal((150, 30), (usage.PromptTokens, usage.CompletionTokens));
     }
 
     [Fact]

@@ -564,6 +564,12 @@ documents no providers file (only the programmatic `NamedProviderConfig`), so wr
 does not read context size or capabilities from `/v1/models`, so `connect` can only point at the app's per-model override. A missing binary now
 reports "is Claude Code installed and on PATH, or set binary-path" instead of a misleading working-directory error.
 
+Early compaction (reported 2026-10-17): the app has no context-window metadata for custom models (`hasContextWindowMetadata: false`, so it ignores
+`context_length` in `/v1/models`), assumes a small default, and compacted chats at about 40 to 60k prompt tokens, which Copilot's own 43k-token
+baseline (system prompt plus 48 tools) reaches in a few turns. Fix is per model in the app: pencil icon, Max prompt tokens 168000, Max output 32000
+(plus effort levels). `connect copilot` now says so. Also fixed on our side: with a repair retry the reported `prompt_tokens` was the sum of
+both attempts (about double), nudging compaction earlier; it is now the final attempt's prompt size.
+
 Known gaps and next steps, in order: (1) retry/repair logging and metrics; (2) the `conduit setup` wizard (the rest of phase 3); (3) Codex driver (phase 4);
 (4) prompt-size cost: Copilot sends about 40 KB of system prompt plus 48 tools per turn, so a Claude turn costs about 43k input tokens, and
 prompt caching across the one-process-per-request design is unverified; (5) session table and agent mode (phase 8).

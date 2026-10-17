@@ -26,6 +26,10 @@ Files in `instances.d/*.conf` beside it are merged in. `conduit config validate`
 
 Settings, Model providers, Add provider, Custom endpoint: base URL `http://127.0.0.1:8787/v1`, wire API `completions`, key blank
 (or the key you set). Use the sync icon to list `claude/sonnet`, `claude/opus`, `claude/haiku` and add the ones you want.
+**Important: set the context size per model.** The app does not read it from `/v1/models` (its log says `hasContextWindowMetadata: false`), so it
+assumes a small default and compacts conversations almost immediately. For each model click the pencil icon and set *Max prompt tokens* to 168000
+and *Max output tokens* to 32000; tick the reasoning-effort levels you want. `conduit connect copilot` prints this too.
+
 Tool calls are parsed tolerantly and, if a call is unusable (unknown tool, missing required argument), the model is asked once more; haiku, sonnet and opus all work (see PLAN.md section 10a).
 
 ## Model ids

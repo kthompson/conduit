@@ -50,7 +50,10 @@ public sealed record ConnectInfo(
         if (models.Count == 0) problems.Add("No ready instances, so the app would list no models. Run `conduit doctor`.");
 
         if (!s.IsLoopback) notes.Add("This is not a loopback address: anyone who can reach it and has the key can use your Claude subscription.");
-        notes.Add("The app shows no context-window or reasoning controls for custom models read from /v1/models; its own per-model override is the place for that.");
+        var window = models.Count > 0 ? models.Max(m => m.ContextWindow) : 200_000;
+        notes.Add($"IMPORTANT: the app does not read the context window from /v1/models, so it assumes a small default and compacts conversations early. " +
+                  $"For each model, click its pencil icon (Model providers > this provider) and set Max prompt tokens to {window - 32_000} and Max output tokens to 32000; " +
+                  "tick the reasoning-effort levels you want (Conduit passes low, medium, high, xhigh, max to Claude).");
         if (models.Any(m => m.Id.EndsWith("/haiku", StringComparison.Ordinal)))
             notes.Add("Prefer sonnet or opus in the app for coding sessions; haiku works but is the weakest at tool calls.");
 

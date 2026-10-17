@@ -243,3 +243,16 @@ public class DoctorAndConnectTests
         Assert.Contains("conduit serve", r[0].Message);
     }
 }
+
+public class ConnectNotesTests
+{
+    [Fact]
+    public async Task Connect_tells_the_user_to_set_max_prompt_tokens_because_the_app_ignores_the_models_endpoint()
+    {
+        var config = ConduitConfig.Parse("server { listen = \"127.0.0.1:9100\", data-dir = \"" + Path.GetTempPath().Replace("\\", "/") + "cc\" }\nprovider-instances { fake { driver = fake } }");
+        var info = await ConnectInfo.BuildAsync(config, [new Conduit.Provider.Fake.FakeDriver()], null, false, CancellationToken.None);
+        var note = Assert.Single(info.Notes, n => n.StartsWith("IMPORTANT"));
+        Assert.Contains("Max prompt tokens to 168000", note);
+        Assert.Contains("compacts conversations early", note);
+    }
+}

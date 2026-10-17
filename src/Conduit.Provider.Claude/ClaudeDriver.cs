@@ -124,7 +124,8 @@ internal sealed class ClaudeInstance : IProviderInstance
                     if (translator.Stopped) break;
                 }
                 turn = translator.Complete();
-                promptTokens += turn.PromptTokens;
+                // The prompt size clients track for compaction is the size of the request that produced the answer, not the sum of attempts.
+                promptTokens = turn.PromptTokens;
                 completionTokens += turn.CompletionTokens;
                 if (turn.Problem is null) break;
             }
