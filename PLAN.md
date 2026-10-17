@@ -556,7 +556,15 @@ Behavior decisions in `ChatEndpoint` (from the capture findings):
 - No API keys configured is allowed on loopback only (the Copilot app sent no `Authorization` header with a blank key); a non-loopback bind
   without a key refuses to start.
 
- `conduit setup` wizard (the rest of phase 3); (3) Codex driver (phase 4);
+Phase 3 (built): `conduit doctor` (`Server/Doctor.cs`, streaming checks: config, exposure, port, data dir, per-instance status and an isolation
+note, then a real one-word completion per ready instance with timing; exit 1 on failure) and `conduit connect copilot` (`Server/ConnectInfo.cs`:
+the form values and model ids; `--check` verifies a running server with the configured key; `--show-key`, `--host`, `--json`). Decision:
+**connect never writes Copilot settings.** The app keeps custom providers in its sqlite `data.db` and the OS keychain, and the bundled SDK
+documents no providers file (only the programmatic `NamedProviderConfig`), so writing would mean editing an undocumented database. The app also
+does not read context size or capabilities from `/v1/models`, so `connect` can only point at the app's per-model override. A missing binary now
+reports "is Claude Code installed and on PATH, or set binary-path" instead of a misleading working-directory error.
+
+Known gaps and next steps, in order: (1) retry/repair logging and metrics; (2) the `conduit setup` wizard (the rest of phase 3); (3) Codex driver (phase 4);
 (4) prompt-size cost: Copilot sends about 40 KB of system prompt plus 48 tools per turn, so a Claude turn costs about 43k input tokens, and
 prompt caching across the one-process-per-request design is unverified; (5) session table and agent mode (phase 8).
 
