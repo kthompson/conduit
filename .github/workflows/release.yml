@@ -1,0 +1,79 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rid: win-x64
+            os: windows-latest
+            ext: .exe
+          - rid: linux-x64
+            os: ubuntu-latest
+            ext: ""
+          - rid: osx-x64
+            os: macos-latest
+            ext: ""
+          - rid: osx-arm64
+            os: macos-latest
+            ext: ""
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Publish ${{ matrix.rid }}
+        run: >
+          dotnet publish src/Conduit.Cli -c Release -r ${{ matrix.rid }}
+          --self-contained true
+          -p:PublishTrimmed=true
+          -p:PublishSingleFile=true
+          -p:EnableCompressionInSingleFile=true
+          -p:DebugType=none
+          -o publish/${{ matrix.rid }}
+
+      - name: Package artifact
+        shell: bash
+        run: |
+          cd publish/${{ matrix.rid }}
+          mkdir -p ../../dist
+          archive=../../dist/conduit-${{ matrix.rid }}
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            7z a "$archive.zip" conduit${{ matrix.ext }}
+          else
+            chmod +x conduit${{ matrix.ext }}
+            tar -czf "$archive.tar.gz" conduit${{ matrix.ext }}
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: conduit-${{ matrix.rid }}
+          path: dist/*
+          retention-days: 7
+
+  release:
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
