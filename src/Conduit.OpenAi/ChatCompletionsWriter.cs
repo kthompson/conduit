@@ -12,11 +12,16 @@ public readonly record struct SseFrame(string? Data, string? Comment = null)
 }
 
 /// <summary>Serializes the internal item stream as Chat Completions chunks, or as one <c>chat.completion</c> object.</summary>
-public sealed class ChatCompletionsWriter(string model, bool includeUsage, int promptTokensEstimate = 0)
+public sealed class ChatCompletionsWriter(
+    string model,
+    bool includeUsage,
+    int promptTokensEstimate = 0
+)
 {
     private readonly string _id = "chatcmpl-" + Guid.NewGuid().ToString("N");
     private readonly long _created = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-    private readonly StringBuilder _text = new(), _reasoning = new();
+    private readonly StringBuilder _text = new(),
+        _reasoning = new();
     private readonly List<ToolCall> _tools = [];
     private int _outChars;
     private UsageEvent? _usage;
@@ -24,25 +29,39 @@ public sealed class ChatCompletionsWriter(string model, bool includeUsage, int p
     public bool Finished { get; private set; }
     public JsonObject? Final { get; private set; }
 
-    private JsonObject Chunk(JsonObject delta, string? finish = null) => new()
-    {
-        ["id"] = _id,
-        ["object"] = "chat.completion.chunk",
-        ["created"] = _created,
-        ["model"] = model,
-        ["choices"] = new JsonArray(new JsonObject { ["index"] = 0, ["delta"] = delta, ["finish_reason"] = finish }),
-    };
+    private JsonObject Chunk(JsonObject delta, string? finish = null) =>
+        new()
+        {
+            ["id"] = _id,
+            ["object"] = "chat.completion.chunk",
+            ["created"] = _created,
+            ["model"] = model,
+            ["choices"] = new JsonArray(
+                new JsonObject
+                {
+                    ["index"] = 0,
+                    ["delta"] = delta,
+                    ["finish_reason"] = finish,
+                }
+            ),
+        };
 
     private static SseFrame F(JsonNode n) => new(n.ToJsonString());
 
-    private JsonObject Usage() => _usage is { } u
-        ? new() { ["prompt_tokens"] = u.PromptTokens, ["completion_tokens"] = u.CompletionTokens, ["total_tokens"] = u.PromptTokens + u.CompletionTokens }
-        : new()
-        {
-            ["prompt_tokens"] = promptTokensEstimate,
-            ["completion_tokens"] = EstimateTokens(_outChars),
-            ["total_tokens"] = promptTokensEstimate + EstimateTokens(_outChars),
-        };
+    private JsonObject Usage() =>
+        _usage is { } u
+            ? new()
+            {
+                ["prompt_tokens"] = u.PromptTokens,
+                ["completion_tokens"] = u.CompletionTokens,
+                ["total_tokens"] = u.PromptTokens + u.CompletionTokens,
+            }
+            : new()
+            {
+                ["prompt_tokens"] = promptTokensEstimate,
+                ["completion_tokens"] = EstimateTokens(_outChars),
+                ["total_tokens"] = promptTokensEstimate + EstimateTokens(_outChars),
+            };
 
     public static int EstimateTokens(int chars) => (chars + 3) / 4;
 
@@ -73,21 +92,43 @@ public sealed class ChatCompletionsWriter(string model, bool includeUsage, int p
                 var index = _tools.Count;
                 _tools.Add(tc.Call);
                 _outChars += tc.Call.ArgumentsJson.Length;
-                yield return F(Chunk(new JsonObject
-                {
-                    ["tool_calls"] = new JsonArray(new JsonObject
-                    {
-                        ["index"] = index, ["id"] = tc.Call.Id, ["type"] = "function",
-                        ["function"] = new JsonObject { ["name"] = tc.Call.Name, ["arguments"] = "" },
-                    }),
-                }));
-                yield return F(Chunk(new JsonObject
-                {
-                    ["tool_calls"] = new JsonArray(new JsonObject
-                    {
-                        ["index"] = index, ["function"] = new JsonObject { ["arguments"] = tc.Call.ArgumentsJson },
-                    }),
-                }));
+                yield return F(
+                    Chunk(
+                        new JsonObject
+                        {
+                            ["tool_calls"] = new JsonArray(
+                                new JsonObject
+                                {
+                                    ["index"] = index,
+                                    ["id"] = tc.Call.Id,
+                                    ["type"] = "function",
+                                    ["function"] = new JsonObject
+                                    {
+                                        ["name"] = tc.Call.Name,
+                                        ["arguments"] = "",
+                                    },
+                                }
+                            ),
+                        }
+                    )
+                );
+                yield return F(
+                    Chunk(
+                        new JsonObject
+                        {
+                            ["tool_calls"] = new JsonArray(
+                                new JsonObject
+                                {
+                                    ["index"] = index,
+                                    ["function"] = new JsonObject
+                                    {
+                                        ["arguments"] = tc.Call.ArgumentsJson,
+                                    },
+                                }
+                            ),
+                        }
+                    )
+                );
                 break;
 
             case UsageEvent u:
@@ -100,36 +141,55 @@ public sealed class ChatCompletionsWriter(string model, bool includeUsage, int p
                 Final = BuildFinal(reason);
                 yield return F(Chunk(new JsonObject(), reason));
                 if (includeUsage)
-                    yield return F(new JsonObject
-                    {
-                        ["id"] = _id, ["object"] = "chat.completion.chunk", ["created"] = _created, ["model"] = model,
-                        ["choices"] = new JsonArray(), ["usage"] = Usage(),
-                    });
+                    yield return F(
+                        new JsonObject
+                        {
+                            ["id"] = _id,
+                            ["object"] = "chat.completion.chunk",
+                            ["created"] = _created,
+                            ["model"] = model,
+                            ["choices"] = new JsonArray(),
+                            ["usage"] = Usage(),
+                        }
+                    );
                 yield return SseFrame.Done;
                 break;
         }
     }
 
-    private static string Reason(FinishReason r) => r switch
-    {
-        FinishReason.Length => "length",
-        FinishReason.ToolCalls => "tool_calls",
-        _ => "stop",
-    };
+    private static string Reason(FinishReason r) =>
+        r switch
+        {
+            FinishReason.Length => "length",
+            FinishReason.ToolCalls => "tool_calls",
+            _ => "stop",
+        };
 
     private JsonObject BuildFinal(string reason)
     {
-        var message = new JsonObject { ["role"] = "assistant", ["content"] = _text.Length == 0 && _tools.Count > 0 ? null : _text.ToString() };
-        if (_reasoning.Length > 0) message["reasoning_content"] = _reasoning.ToString();
+        var message = new JsonObject
+        {
+            ["role"] = "assistant",
+            ["content"] = _text.Length == 0 && _tools.Count > 0 ? null : _text.ToString(),
+        };
+        if (_reasoning.Length > 0)
+            message["reasoning_content"] = _reasoning.ToString();
         if (_tools.Count > 0)
         {
             var calls = new JsonArray();
             foreach (var c in _tools)
-                calls.Add(new JsonObject
-                {
-                    ["id"] = c.Id, ["type"] = "function",
-                    ["function"] = new JsonObject { ["name"] = c.Name, ["arguments"] = c.ArgumentsJson },
-                });
+                calls.Add(
+                    new JsonObject
+                    {
+                        ["id"] = c.Id,
+                        ["type"] = "function",
+                        ["function"] = new JsonObject
+                        {
+                            ["name"] = c.Name,
+                            ["arguments"] = c.ArgumentsJson,
+                        },
+                    }
+                );
             message["tool_calls"] = calls;
         }
 
@@ -139,7 +199,14 @@ public sealed class ChatCompletionsWriter(string model, bool includeUsage, int p
             ["object"] = "chat.completion",
             ["created"] = _created,
             ["model"] = model,
-            ["choices"] = new JsonArray(new JsonObject { ["index"] = 0, ["message"] = message, ["finish_reason"] = reason }),
+            ["choices"] = new JsonArray(
+                new JsonObject
+                {
+                    ["index"] = 0,
+                    ["message"] = message,
+                    ["finish_reason"] = reason,
+                }
+            ),
             ["usage"] = Usage(),
         };
     }

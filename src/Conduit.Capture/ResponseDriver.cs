@@ -30,13 +30,19 @@ public sealed class RequestTiming(Stopwatch clock)
         LastWriteMs = now;
         BytesWritten += bytes;
         Frames++;
-        if (keepAlive) KeepAlives++;
+        if (keepAlive)
+            KeepAlives++;
     }
 }
 
 internal static class ResponseDriver
 {
-    public static async Task WriteJsonAsync(HttpContext ctx, int status, string json, RequestTiming t)
+    public static async Task WriteJsonAsync(
+        HttpContext ctx,
+        int status,
+        string json,
+        RequestTiming t
+    )
     {
         ctx.Response.StatusCode = status;
         ctx.Response.ContentType = "application/json; charset=utf-8";
@@ -48,8 +54,14 @@ internal static class ResponseDriver
     }
 
     /// <summary>Plays <paramref name="events"/> through <paramref name="renderer"/> as SSE or one JSON body.</summary>
-    public static async Task RunAsync(HttpContext ctx, IWireRenderer renderer, IEnumerable<ScriptEvent> events,
-        bool stream, CaptureOptions options, RequestTiming t)
+    public static async Task RunAsync(
+        HttpContext ctx,
+        IWireRenderer renderer,
+        IEnumerable<ScriptEvent> events,
+        bool stream,
+        CaptureOptions options,
+        RequestTiming t
+    )
     {
         var ct = ctx.RequestAborted;
 
@@ -72,10 +84,14 @@ internal static class ResponseDriver
 
         async Task SendAll(IEnumerable<SseFrame> frames)
         {
-            foreach (var fr in frames) await Send(fr);
+            foreach (var fr in frames)
+                await Send(fr);
         }
 
-        if (stream) await SendAll(renderer.Begin()); else _ = renderer.Begin().ToList();
+        if (stream)
+            await SendAll(renderer.Begin());
+        else
+            _ = renderer.Begin().ToList();
 
         foreach (var ev in events)
         {
@@ -96,7 +112,10 @@ internal static class ResponseDriver
                         var half = "{\"id\":\"" + "chatcmpl-cut";
                         ctx.Response.StatusCode = 200;
                         ctx.Response.ContentType = "application/json";
-                        await ctx.Response.Body.WriteAsync(System.Text.Encoding.UTF8.GetBytes(half), ct);
+                        await ctx.Response.Body.WriteAsync(
+                            System.Text.Encoding.UTF8.GetBytes(half),
+                            ct
+                        );
                         await ctx.Response.Body.FlushAsync(ct);
                         t.Wrote(half.Length, false);
                     }
@@ -107,7 +126,10 @@ internal static class ResponseDriver
 
                 default:
                     var frames = renderer.Render(ev);
-                    if (stream) await SendAll(frames); else _ = frames.ToList();
+                    if (stream)
+                        await SendAll(frames);
+                    else
+                        _ = frames.ToList();
                     break;
             }
         }
@@ -115,19 +137,31 @@ internal static class ResponseDriver
         if (!renderer.Finished)
         {
             var frames = renderer.Render(new Finish("stop"));
-            if (stream) await SendAll(frames); else _ = frames.ToList();
+            if (stream)
+                await SendAll(frames);
+            else
+                _ = frames.ToList();
         }
 
         if (!stream && renderer.Final is { } final)
             await WriteJsonAsync(ctx, 200, WireJson.S(final), t);
     }
 
-    private static async Task PauseAsync(Pause p, bool stream, CaptureOptions options, Func<SseFrame, Task> send, CancellationToken ct)
+    private static async Task PauseAsync(
+        Pause p,
+        bool stream,
+        CaptureOptions options,
+        Func<SseFrame, Task> send,
+        CancellationToken ct
+    )
     {
         var remaining = p.Duration;
         while (remaining > TimeSpan.Zero)
         {
-            var step = stream && p.KeepAlive ? TimeSpan.FromTicks(Math.Min(remaining.Ticks, options.KeepAliveInterval.Ticks)) : remaining;
+            var step =
+                stream && p.KeepAlive
+                    ? TimeSpan.FromTicks(Math.Min(remaining.Ticks, options.KeepAliveInterval.Ticks))
+                    : remaining;
             await Task.Delay(step, ct);
             remaining -= step;
             if (stream && p.KeepAlive && remaining > TimeSpan.Zero)

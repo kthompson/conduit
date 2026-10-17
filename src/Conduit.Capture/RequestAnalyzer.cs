@@ -28,17 +28,27 @@ public sealed class RequestFacts
     {
         var sb = new StringBuilder();
         sb.AppendLine("**Capture server echo**").AppendLine();
-        sb.AppendLine($"- wire format: `{Wire}`, stream: `{Stream}`, model sent: `{Model ?? "(none)"}`, scenario: `{scenarioLabel}`");
+        sb.AppendLine(
+            $"- wire format: `{Wire}`, stream: `{Stream}`, model sent: `{Model ?? "(none)"}`, scenario: `{scenarioLabel}`"
+        );
         sb.AppendLine($"- prompt size: ~{PromptChars:N0} chars");
-        sb.AppendLine($"- tools offered: **{ToolCount}**" + (FirstToolName is null ? "" : $" (first: `{FirstToolName}`)"));
+        sb.AppendLine(
+            $"- tools offered: **{ToolCount}**"
+                + (FirstToolName is null ? "" : $" (first: `{FirstToolName}`)")
+        );
         if (Json["messages"] is JsonObject m)
         {
             sb.AppendLine($"- messages: {m["count"]}, roles: `{Join(m["roles"], 24)}`");
-            sb.AppendLine($"- content part types: `{Join(m["partTypes"], 20)}`, images: {m["hasImages"]}, tool results: {m["hasToolResults"]}");
+            sb.AppendLine(
+                $"- content part types: `{Join(m["partTypes"], 20)}`, images: {m["hasImages"]}, tool results: {m["hasToolResults"]}"
+            );
         }
-        if (Json["reasoning"] is JsonObject r && r.Count > 0) sb.AppendLine($"- reasoning fields: `{Wire_S(r)}`");
-        if (Json["toolChoice"] is { } tc) sb.AppendLine($"- tool_choice: `{Wire_S(tc)}`");
-        if (Json["streamOptions"] is { } so) sb.AppendLine($"- stream_options: `{Wire_S(so)}`");
+        if (Json["reasoning"] is JsonObject r && r.Count > 0)
+            sb.AppendLine($"- reasoning fields: `{Wire_S(r)}`");
+        if (Json["toolChoice"] is { } tc)
+            sb.AppendLine($"- tool_choice: `{Wire_S(tc)}`");
+        if (Json["streamOptions"] is { } so)
+            sb.AppendLine($"- stream_options: `{Wire_S(so)}`");
         sb.AppendLine($"- session-like ids found: **{SessionIdCount}**");
         if (Json["sessionIds"] is JsonArray ids)
             foreach (var id in ids.Take(8))
@@ -47,7 +57,8 @@ public sealed class RequestFacts
         if (Json["paths"] is JsonArray paths)
             foreach (var p in paths.Take(8))
                 sb.AppendLine($"  - `{p?["path"]}` (in {p?["where"]})");
-        if (Json["params"] is JsonObject pr && pr.Count > 0) sb.AppendLine($"- other params: `{Wire_S(pr)}`");
+        if (Json["params"] is JsonObject pr && pr.Count > 0)
+            sb.AppendLine($"- other params: `{Wire_S(pr)}`");
         return sb.ToString();
     }
 
@@ -55,7 +66,8 @@ public sealed class RequestFacts
 
     private static string Join(JsonNode? arr, int max)
     {
-        if (arr is not JsonArray a) return "";
+        if (arr is not JsonArray a)
+            return "";
         var items = a.Take(max).Select(x => x?.ToString() ?? "");
         return string.Join(",", items) + (a.Count > max ? ",..." : "");
     }
@@ -65,18 +77,50 @@ public static partial class RequestAnalyzer
 {
     private static readonly string[] ScalarParams =
     [
-        "temperature", "top_p", "top_k", "max_tokens", "max_completion_tokens", "max_output_tokens", "n", "stop", "seed",
-        "presence_penalty", "frequency_penalty", "logprobs", "top_logprobs", "parallel_tool_calls", "store", "background",
-        "truncation", "service_tier", "modalities", "verbosity", "prediction", "stop_sequences",
+        "temperature",
+        "top_p",
+        "top_k",
+        "max_tokens",
+        "max_completion_tokens",
+        "max_output_tokens",
+        "n",
+        "stop",
+        "seed",
+        "presence_penalty",
+        "frequency_penalty",
+        "logprobs",
+        "top_logprobs",
+        "parallel_tool_calls",
+        "store",
+        "background",
+        "truncation",
+        "service_tier",
+        "modalities",
+        "verbosity",
+        "prediction",
+        "stop_sequences",
     ];
 
     private static readonly string[] BodySessionFields =
     [
-        "user", "previous_response_id", "conversation", "prompt_cache_key", "safety_identifier",
-        "session_id", "conversation_id", "thread_id", "chat_id", "request_id", "client_session_id",
+        "user",
+        "previous_response_id",
+        "conversation",
+        "prompt_cache_key",
+        "safety_identifier",
+        "session_id",
+        "conversation_id",
+        "thread_id",
+        "chat_id",
+        "request_id",
+        "client_session_id",
     ];
 
-    private static readonly HashSet<string> SystemRoles = new(StringComparer.OrdinalIgnoreCase) { "system", "developer" };
+    private static readonly HashSet<string> SystemRoles = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "system",
+        "developer",
+    };
 
     public static RequestFacts Analyze(string wire, IHeaderDictionary headers, JsonNode? body)
     {
@@ -88,7 +132,9 @@ public static partial class RequestAnalyzer
 
         if (body is JsonObject root)
         {
-            j["topLevelKeys"] = new JsonArray(root.Select(kv => (JsonNode?)JsonValue.Create(kv.Key)).ToArray());
+            j["topLevelKeys"] = new JsonArray(
+                root.Select(kv => (JsonNode?)JsonValue.Create(kv.Key)).ToArray()
+            );
             f.Model = Str(root["model"]);
             j["model"] = f.Model;
             f.Stream = root["stream"] is JsonValue sv && sv.TryGetValue<bool>(out var s) && s;
@@ -97,15 +143,25 @@ public static partial class RequestAnalyzer
             if (root["stream_options"] is JsonNode so)
             {
                 j["streamOptions"] = so.DeepClone();
-                f.IncludeUsage = so is JsonObject soo && soo["include_usage"] is JsonValue iu && iu.TryGetValue<bool>(out var b) && b;
+                f.IncludeUsage =
+                    so is JsonObject soo
+                    && soo["include_usage"] is JsonValue iu
+                    && iu.TryGetValue<bool>(out var b)
+                    && b;
             }
             j["includeUsage"] = f.IncludeUsage;
 
             switch (wire)
             {
-                case "chat": AnalyzeChat(root, f); break;
-                case "responses": AnalyzeResponses(root, f); break;
-                case "messages": AnalyzeMessages(root, f); break;
+                case "chat":
+                    AnalyzeChat(root, f);
+                    break;
+                case "responses":
+                    AnalyzeResponses(root, f);
+                    break;
+                case "messages":
+                    AnalyzeMessages(root, f);
+                    break;
             }
 
             AnalyzeCommon(root, f);
@@ -121,17 +177,28 @@ public static partial class RequestAnalyzer
     private static void AnalyzeChat(JsonObject root, RequestFacts f)
     {
         var tools = root["tools"] as JsonArray ?? root["functions"] as JsonArray;
-        SummarizeTools(tools, f, t => Str(t?["function"]?["name"]) ?? Str(t?["custom"]?["name"]) ?? Str(t?["name"]));
-        if (root["tool_choice"] is { } tc) f.Json["toolChoice"] = tc.DeepClone();
-        if (root["reasoning_effort"] is { } re) Reasoning(f)["reasoning_effort"] = re.DeepClone();
-        if (root["reasoning"] is { } r) Reasoning(f)["reasoning"] = r.DeepClone();
-        if (root["thinking"] is { } th) Reasoning(f)["thinking"] = th.DeepClone();
-        if (root["response_format"] is JsonObject rf) f.Json.GetOrAddObject("params")["response_format"] = Str(rf["type"]);
+        SummarizeTools(
+            tools,
+            f,
+            t => Str(t?["function"]?["name"]) ?? Str(t?["custom"]?["name"]) ?? Str(t?["name"])
+        );
+        if (root["tool_choice"] is { } tc)
+            f.Json["toolChoice"] = tc.DeepClone();
+        if (root["reasoning_effort"] is { } re)
+            Reasoning(f)["reasoning_effort"] = re.DeepClone();
+        if (root["reasoning"] is { } r)
+            Reasoning(f)["reasoning"] = r.DeepClone();
+        if (root["thinking"] is { } th)
+            Reasoning(f)["thinking"] = th.DeepClone();
+        if (root["response_format"] is JsonObject rf)
+            f.Json.GetOrAddObject("params")["response_format"] = Str(rf["type"]);
 
         var m = Messages(f);
         var roles = new JsonArray();
         var parts = new SortedSet<string>();
-        var count = 0; var systemChars = 0; var textChars = 0;
+        var count = 0;
+        var systemChars = 0;
+        var textChars = 0;
         if (root["messages"] is JsonArray msgs)
         {
             foreach (var msg in msgs)
@@ -139,11 +206,14 @@ public static partial class RequestAnalyzer
                 count++;
                 var role = Str(msg?["role"]) ?? "?";
                 roles.Add(role);
-                if (role is "tool" or "function") Note(f, Str(msg?["content"]) ?? msg?["content"]?.ToJsonString());
+                if (role is "tool" or "function")
+                    Note(f, Str(msg?["content"]) ?? msg?["content"]?.ToJsonString());
                 var chars = ContentParts(msg?["content"], parts);
                 textChars += chars;
-                if (SystemRoles.Contains(role)) systemChars += chars;
-                if (msg?["tool_calls"] is JsonArray) parts.Add("tool_calls");
+                if (SystemRoles.Contains(role))
+                    systemChars += chars;
+                if (msg?["tool_calls"] is JsonArray)
+                    parts.Add("tool_calls");
             }
             m["lastRole"] = roles.Count > 0 ? roles[^1]?.GetValue<string>() : null;
         }
@@ -152,21 +222,35 @@ public static partial class RequestAnalyzer
 
     private static void AnalyzeResponses(JsonObject root, RequestFacts f)
     {
-        SummarizeTools(root["tools"] as JsonArray, f, t => Str(t?["name"]) ?? Str(t?["function"]?["name"]));
-        if (root["tool_choice"] is { } tc) f.Json["toolChoice"] = tc.DeepClone();
-        if (root["reasoning"] is { } r) Reasoning(f)["reasoning"] = r.DeepClone();
-        if (root["include"] is { } inc) Reasoning(f)["include"] = inc.DeepClone();
-        if (root["text"] is JsonObject text) f.Json.GetOrAddObject("params")["text"] = text.DeepClone();
+        SummarizeTools(
+            root["tools"] as JsonArray,
+            f,
+            t => Str(t?["name"]) ?? Str(t?["function"]?["name"])
+        );
+        if (root["tool_choice"] is { } tc)
+            f.Json["toolChoice"] = tc.DeepClone();
+        if (root["reasoning"] is { } r)
+            Reasoning(f)["reasoning"] = r.DeepClone();
+        if (root["include"] is { } inc)
+            Reasoning(f)["include"] = inc.DeepClone();
+        if (root["text"] is JsonObject text)
+            f.Json.GetOrAddObject("params")["text"] = text.DeepClone();
 
         var m = Messages(f);
         var roles = new JsonArray();
         var parts = new SortedSet<string>();
-        var count = 0; var systemChars = Str(root["instructions"])?.Length ?? 0; var textChars = systemChars;
-        if (systemChars > 0) parts.Add("instructions");
+        var count = 0;
+        var systemChars = Str(root["instructions"])?.Length ?? 0;
+        var textChars = systemChars;
+        if (systemChars > 0)
+            parts.Add("instructions");
         switch (root["input"])
         {
             case JsonValue v when v.TryGetValue<string>(out var s):
-                count = 1; roles.Add("user"); textChars += s.Length; parts.Add("input:string");
+                count = 1;
+                roles.Add("user");
+                textChars += s.Length;
+                parts.Add("input:string");
                 break;
             case JsonArray items:
                 foreach (var item in items)
@@ -176,10 +260,12 @@ public static partial class RequestAnalyzer
                     var role = Str(item?["role"]) ?? type;
                     roles.Add(role);
                     parts.Add("item:" + type);
-                    if (type == "function_call_output") Note(f, Str(item?["output"]) ?? item?["output"]?.ToJsonString());
+                    if (type == "function_call_output")
+                        Note(f, Str(item?["output"]) ?? item?["output"]?.ToJsonString());
                     var chars = ContentParts(item?["content"], parts);
                     textChars += chars;
-                    if (SystemRoles.Contains(role)) systemChars += chars;
+                    if (SystemRoles.Contains(role))
+                        systemChars += chars;
                 }
                 break;
         }
@@ -190,18 +276,28 @@ public static partial class RequestAnalyzer
     private static void AnalyzeMessages(JsonObject root, RequestFacts f)
     {
         SummarizeTools(root["tools"] as JsonArray, f, t => Str(t?["name"]));
-        if (root["tool_choice"] is { } tc) f.Json["toolChoice"] = tc.DeepClone();
-        if (root["thinking"] is { } th) Reasoning(f)["thinking"] = th.DeepClone();
-        if (root["output_config"] is { } oc) Reasoning(f)["output_config"] = oc.DeepClone();
+        if (root["tool_choice"] is { } tc)
+            f.Json["toolChoice"] = tc.DeepClone();
+        if (root["thinking"] is { } th)
+            Reasoning(f)["thinking"] = th.DeepClone();
+        if (root["output_config"] is { } oc)
+            Reasoning(f)["output_config"] = oc.DeepClone();
 
         var m = Messages(f);
         var roles = new JsonArray();
         var parts = new SortedSet<string>();
-        var count = 0; var systemChars = 0; var textChars = 0;
+        var count = 0;
+        var systemChars = 0;
+        var textChars = 0;
         switch (root["system"])
         {
-            case JsonValue v when v.TryGetValue<string>(out var s): systemChars = s.Length; parts.Add("system:string"); break;
-            case JsonArray blocks: systemChars = ContentParts(blocks, parts, "system:"); break;
+            case JsonValue v when v.TryGetValue<string>(out var s):
+                systemChars = s.Length;
+                parts.Add("system:string");
+                break;
+            case JsonArray blocks:
+                systemChars = ContentParts(blocks, parts, "system:");
+                break;
         }
         textChars += systemChars;
         if (root["messages"] is JsonArray msgs)
@@ -212,7 +308,11 @@ public static partial class RequestAnalyzer
                 roles.Add(Str(msg?["role"]) ?? "?");
                 textChars += ContentParts(msg?["content"], parts);
                 if (msg?["content"] is JsonArray blocks)
-                    foreach (var b in blocks.OfType<JsonObject>().Where(b => Str(b["type"]) == "tool_result"))
+                    foreach (
+                        var b in blocks
+                            .OfType<JsonObject>()
+                            .Where(b => Str(b["type"]) == "tool_result")
+                    )
                         Note(f, Str(b["content"]) ?? b["content"]?.ToJsonString());
             }
         }
@@ -225,27 +325,47 @@ public static partial class RequestAnalyzer
     {
         var pr = f.Json.GetOrAddObject("params");
         foreach (var name in ScalarParams)
-            if (root[name] is { } v) pr[name] = v.DeepClone();
+            if (root[name] is { } v)
+                pr[name] = v.DeepClone();
 
         foreach (var name in BodySessionFields)
             if (root[name] is { } v)
-                AddSessionId(f.Json, "body", name, v is JsonValue ? v.ToString() : v.ToJsonString());
+                AddSessionId(
+                    f.Json,
+                    "body",
+                    name,
+                    v is JsonValue ? v.ToString() : v.ToJsonString()
+                );
         if (root["metadata"] is JsonObject md)
             foreach (var kv in md)
                 AddSessionId(f.Json, "body", "metadata." + kv.Key, kv.Value?.ToString() ?? "null");
     }
 
-    private static void SummarizeTools(JsonArray? tools, RequestFacts f, Func<JsonNode?, string?> nameOf)
+    private static void SummarizeTools(
+        JsonArray? tools,
+        RequestFacts f,
+        Func<JsonNode?, string?> nameOf
+    )
     {
         var info = f.Json.GetOrAddObject("tools");
         var count = tools?.Count ?? 0;
         info["count"] = count;
         f.ToolCount = count;
-        if (tools is null || count == 0) return;
-        info["types"] = new JsonArray(tools.Select(t => Str(t?["type"]) ?? (t?["input_schema"] is not null ? "anthropic" : "?"))
-            .Distinct().Select(x => (JsonNode?)JsonValue.Create(x)).ToArray());
+        if (tools is null || count == 0)
+            return;
+        info["types"] = new JsonArray(
+            tools
+                .Select(t =>
+                    Str(t?["type"]) ?? (t?["input_schema"] is not null ? "anthropic" : "?")
+                )
+                .Distinct()
+                .Select(x => (JsonNode?)JsonValue.Create(x))
+                .ToArray()
+        );
         var names = tools.Select(nameOf).Where(n => n is not null).Select(n => n!).ToList();
-        info["names"] = new JsonArray(names.Take(80).Select(n => (JsonNode?)JsonValue.Create(n)).ToArray());
+        info["names"] = new JsonArray(
+            names.Take(80).Select(n => (JsonNode?)JsonValue.Create(n)).ToArray()
+        );
         f.FirstToolName = names.FirstOrDefault();
         var first = tools[0];
         if (first is JsonObject fo)
@@ -266,17 +386,29 @@ public static partial class RequestAnalyzer
     }
 
     private static JsonObject Reasoning(RequestFacts f) => f.Json.GetOrAddObject("reasoning");
+
     private static JsonObject Messages(RequestFacts f) => f.Json.GetOrAddObject("messages");
 
-    private static void FinishMessages(RequestFacts f, JsonObject m, JsonArray roles, SortedSet<string> parts,
-        int count, int systemChars, int textChars)
+    private static void FinishMessages(
+        RequestFacts f,
+        JsonObject m,
+        JsonArray roles,
+        SortedSet<string> parts,
+        int count,
+        int systemChars,
+        int textChars
+    )
     {
         m["count"] = count;
-        m["roles"] = roles.Count > 200 ? new JsonArray(roles.TakeLast(200).Select(x => x?.DeepClone()).ToArray()) : roles;
+        m["roles"] =
+            roles.Count > 200
+                ? new JsonArray(roles.TakeLast(200).Select(x => x?.DeepClone()).ToArray())
+                : roles;
         m["partTypes"] = new JsonArray(parts.Select(p => (JsonNode?)JsonValue.Create(p)).ToArray());
         m["hasImages"] = parts.Any(p => p.Contains("image", StringComparison.OrdinalIgnoreCase));
         m["hasToolResults"] = f.ContainsToolResults;
-        if (f.ToolResultSnippet is not null) f.Json["toolResultSnippet"] = f.ToolResultSnippet;
+        if (f.ToolResultSnippet is not null)
+            f.Json["toolResultSnippet"] = f.ToolResultSnippet;
         m["systemChars"] = systemChars;
         m["textChars"] = textChars;
         f.PromptChars = textChars;
@@ -311,24 +443,34 @@ public static partial class RequestAnalyzer
             f.ToolResultSnippet = toolResult.Length > 240 ? toolResult[..240] + "..." : toolResult;
     }
 
-    private static string? Str(JsonNode? n) => n is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
+    private static string? Str(JsonNode? n) =>
+        n is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
 
     // ---- session-like ids --------------------------------------------------------------------------------------
 
-    [GeneratedRegex("session|conversation|thread|chat-?id|trace|request-?id|correlation|interaction|agent|task|turn|client-?id|device|machine|user-?id|editor|integration|intent|vscode",
-        RegexOptions.IgnoreCase)]
+    [GeneratedRegex(
+        "session|conversation|thread|chat-?id|trace|request-?id|correlation|interaction|agent|task|turn|client-?id|device|machine|user-?id|editor|integration|intent|vscode",
+        RegexOptions.IgnoreCase
+    )]
     private static partial Regex SessionHeaderName();
 
     private static readonly HashSet<string> NeverLog = new(StringComparer.OrdinalIgnoreCase)
     {
-        "authorization", "proxy-authorization", "x-api-key", "api-key", "cookie", "set-cookie", "user-agent",
+        "authorization",
+        "proxy-authorization",
+        "x-api-key",
+        "api-key",
+        "cookie",
+        "set-cookie",
+        "user-agent",
     };
 
     private static void CollectHeaderSessionIds(IHeaderDictionary headers, JsonObject j)
     {
         foreach (var h in headers)
         {
-            if (NeverLog.Contains(h.Key) || !SessionHeaderName().IsMatch(h.Key)) continue;
+            if (NeverLog.Contains(h.Key) || !SessionHeaderName().IsMatch(h.Key))
+                continue;
             AddSessionId(j, "header", h.Key.ToLowerInvariant(), h.Value.ToString());
         }
     }
@@ -336,11 +478,19 @@ public static partial class RequestAnalyzer
     private static void AddSessionId(JsonObject j, string where, string name, string value)
     {
         var arr = j["sessionIds"] as JsonArray;
-        if (arr is null) { arr = new JsonArray(); j["sessionIds"] = arr; }
-        arr.Add(new JsonObject
+        if (arr is null)
         {
-            ["where"] = where, ["name"] = name, ["value"] = value.Length > 200 ? value[..200] + "..." : value,
-        });
+            arr = new JsonArray();
+            j["sessionIds"] = arr;
+        }
+        arr.Add(
+            new JsonObject
+            {
+                ["where"] = where,
+                ["name"] = name,
+                ["value"] = value.Length > 200 ? value[..200] + "..." : value,
+            }
+        );
     }
 
     // ---- filesystem paths --------------------------------------------------------------------------------------
@@ -357,13 +507,40 @@ public static partial class RequestAnalyzer
 
     private static readonly HashSet<string> KnownRoots = new(StringComparer.Ordinal)
     {
-        "tmp", "home", "Users", "workspace", "workspaces", "repo", "repos", "mnt", "opt", "var", "etc", "usr",
-        "Volumes", "root", "srv", "work", "app", "code", "projects", "private",
+        "tmp",
+        "home",
+        "Users",
+        "workspace",
+        "workspaces",
+        "repo",
+        "repos",
+        "mnt",
+        "opt",
+        "var",
+        "etc",
+        "usr",
+        "Volumes",
+        "root",
+        "srv",
+        "work",
+        "app",
+        "code",
+        "projects",
+        "private",
     };
 
     private static readonly HashSet<string> NotFsRoots = new(StringComparer.OrdinalIgnoreCase)
     {
-        "v1", "v2", "v1beta", "api", "openai", "responses", "chat", "models", "messages", "completions",
+        "v1",
+        "v2",
+        "v1beta",
+        "api",
+        "openai",
+        "responses",
+        "chat",
+        "models",
+        "messages",
+        "completions",
     };
 
     private static void ScanPaths(JsonObject root, RequestFacts f)
@@ -372,21 +549,28 @@ public static partial class RequestAnalyzer
 
         void Visit(string label, string text)
         {
-            if (text.Length > 1_000_000) text = text[..1_000_000];
-            foreach (Match m in UnixPath().Matches(text)) Add(m.Value, label);
-            foreach (Match m in WindowsPath().Matches(text)) Add(m.Value, label);
-            foreach (Match m in FileUri().Matches(text)) Add(m.Value, label);
+            if (text.Length > 1_000_000)
+                text = text[..1_000_000];
+            foreach (Match m in UnixPath().Matches(text))
+                Add(m.Value, label);
+            foreach (Match m in WindowsPath().Matches(text))
+                Add(m.Value, label);
+            foreach (Match m in FileUri().Matches(text))
+                Add(m.Value, label);
         }
 
         void Add(string raw, string label)
         {
             var p = raw.TrimEnd('.', ',', ';', ':', ')', ']', '}', '\'', '"', '`', '*');
-            if (p.Length < 3) return;
+            if (p.Length < 3)
+                return;
             if (p.StartsWith('/') || p.StartsWith("~/"))
             {
                 var segs = p.TrimStart('~').Trim('/').Split('/');
-                if (NotFsRoots.Contains(segs[0])) return;
-                if (segs.Length < 2 && !p.StartsWith("~/") && !KnownRoots.Contains(segs[0])) return;
+                if (NotFsRoots.Contains(segs[0]))
+                    return;
+                if (segs.Length < 2 && !p.StartsWith("~/") && !KnownRoots.Contains(segs[0]))
+                    return;
             }
             found[p] = found.TryGetValue(p, out var e) ? (e.Where, e.Count + 1) : (label, 1);
         }
@@ -395,36 +579,60 @@ public static partial class RequestAnalyzer
 
         var paths = new JsonArray();
         foreach (var kv in found.OrderByDescending(x => x.Value.Count).ThenBy(x => x.Key).Take(100))
-            paths.Add(new JsonObject
-            {
-                ["path"] = kv.Key, ["where"] = Categorize(kv.Value.Where), ["firstLocation"] = kv.Value.Where, ["count"] = kv.Value.Count,
-            });
+            paths.Add(
+                new JsonObject
+                {
+                    ["path"] = kv.Key,
+                    ["where"] = Categorize(kv.Value.Where),
+                    ["firstLocation"] = kv.Value.Where,
+                    ["count"] = kv.Value.Count,
+                }
+            );
         f.PathCount = found.Count;
-        if (paths.Count > 0) f.Json["paths"] = paths;
+        if (paths.Count > 0)
+            f.Json["paths"] = paths;
     }
 
     private static string Categorize(string label)
     {
         var l = label.ToLowerInvariant();
-        if (l.StartsWith(".instructions") || l.StartsWith(".system") || l.Contains("{system}") || l.Contains("{developer}")) return "system prompt";
-        if (l.StartsWith(".tools")) return "tool definitions";
-        if (l.Contains("{tool}") || l.Contains("tool_result") || l.Contains("function_call_output")) return "tool results";
-        if (l.Contains("{assistant}")) return "assistant message";
-        if (l.Contains("{user}")) return "user message";
-        if (l.StartsWith(".metadata")) return "metadata";
+        if (
+            l.StartsWith(".instructions")
+            || l.StartsWith(".system")
+            || l.Contains("{system}")
+            || l.Contains("{developer}")
+        )
+            return "system prompt";
+        if (l.StartsWith(".tools"))
+            return "tool definitions";
+        if (l.Contains("{tool}") || l.Contains("tool_result") || l.Contains("function_call_output"))
+            return "tool results";
+        if (l.Contains("{assistant}"))
+            return "assistant message";
+        if (l.Contains("{user}"))
+            return "user message";
+        if (l.StartsWith(".metadata"))
+            return "metadata";
         return "other (" + label + ")";
     }
 
-    private static void Walk(JsonNode? n, string label, string? role, Action<string, string> onString)
+    private static void Walk(
+        JsonNode? n,
+        string label,
+        string? role,
+        Action<string, string> onString
+    )
     {
         switch (n)
         {
             case JsonObject o:
                 var r = Str(o["role"]) ?? role;
-                foreach (var kv in o) Walk(kv.Value, label + "." + kv.Key, r, onString);
+                foreach (var kv in o)
+                    Walk(kv.Value, label + "." + kv.Key, r, onString);
                 break;
             case JsonArray a:
-                for (var i = 0; i < a.Count; i++) Walk(a[i], $"{label}[{i}]", role, onString);
+                for (var i = 0; i < a.Count; i++)
+                    Walk(a[i], $"{label}[{i}]", role, onString);
                 break;
             case JsonValue v when v.TryGetValue<string>(out var s):
                 onString(role is null ? label : $"{label}{{{role}}}", s);
@@ -437,7 +645,8 @@ internal static class JsonObjectExtensions
 {
     public static JsonObject GetOrAddObject(this JsonObject parent, string name)
     {
-        if (parent[name] is JsonObject existing) return existing;
+        if (parent[name] is JsonObject existing)
+            return existing;
         var created = new JsonObject();
         parent[name] = created;
         return created;

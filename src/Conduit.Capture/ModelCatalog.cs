@@ -15,7 +15,8 @@ public sealed class ModelCatalog
     public ModelCatalog(CaptureOptions options)
     {
         _o = options;
-        if (options.ModelsFile is not null) _fileBody = JsonNode.Parse(File.ReadAllText(options.ModelsFile));
+        if (options.ModelsFile is not null)
+            _fileBody = JsonNode.Parse(File.ReadAllText(options.ModelsFile));
     }
 
     public IReadOnlyList<string> AllIds
@@ -34,7 +35,8 @@ public sealed class ModelCatalog
 
     public string ListJson()
     {
-        if (_fileBody is not null) return _fileBody.ToJsonString(Wire.WireJson.Opts);
+        if (_fileBody is not null)
+            return _fileBody.ToJsonString(Wire.WireJson.Opts);
         var data = new JsonArray(AllIds.Select(id => (JsonNode?)Model(id)).ToArray());
         return new JsonObject
         {
@@ -52,7 +54,8 @@ public sealed class ModelCatalog
         if (_fileBody?["data"] is JsonArray fileModels)
         {
             var hit = fileModels.OfType<JsonObject>().FirstOrDefault(m => (string?)m["id"] == id);
-            if (hit is not null) return (JsonObject)hit.DeepClone();
+            if (hit is not null)
+                return (JsonObject)hit.DeepClone();
         }
         return AllIds.Contains(id, StringComparer.OrdinalIgnoreCase) ? Model(id) : null;
     }
@@ -63,7 +66,8 @@ public sealed class ModelCatalog
         var max = Math.Min(_o.MaxOutputTokens, ctx);
         var tools = _o.AdvertiseToolCalling;
         var supportedParams = new List<string> { "max_tokens", "temperature", "stream", "stop" };
-        if (tools) supportedParams.AddRange(["tools", "tool_choice", "parallel_tool_calls"]);
+        if (tools)
+            supportedParams.AddRange(["tools", "tool_choice", "parallel_tool_calls"]);
         supportedParams.AddRange(["reasoning", "reasoning_effort", "response_format"]);
 
         return new JsonObject
@@ -75,7 +79,9 @@ public sealed class ModelCatalog
             // Anthropic list shape
             ["type"] = "model",
             ["display_name"] = id,
-            ["created_at"] = DateTimeOffset.FromUnixTimeSeconds(_created).ToString("yyyy-MM-ddTHH:mm:ssZ"),
+            ["created_at"] = DateTimeOffset
+                .FromUnixTimeSeconds(_created)
+                .ToString("yyyy-MM-ddTHH:mm:ssZ"),
             // context / output limits under the names various clients read
             ["context_length"] = ctx,
             ["context_window"] = ctx,
@@ -113,8 +119,14 @@ public sealed class ModelCatalog
                 ["reasoning"] = true,
             },
             // OpenRouter-style
-            ["supported_parameters"] = new JsonArray(supportedParams.Select(p => (JsonNode?)JsonValue.Create(p)).ToArray()),
-            ["top_provider"] = new JsonObject { ["context_length"] = ctx, ["max_completion_tokens"] = max },
+            ["supported_parameters"] = new JsonArray(
+                supportedParams.Select(p => (JsonNode?)JsonValue.Create(p)).ToArray()
+            ),
+            ["top_provider"] = new JsonObject
+            {
+                ["context_length"] = ctx,
+                ["max_completion_tokens"] = max,
+            },
             ["architecture"] = new JsonObject
             {
                 ["input_modalities"] = new JsonArray("text"),

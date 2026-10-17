@@ -427,65 +427,114 @@ public class ClaudeProcessTests
 
 public class ChunkSplitTests
 {
-    private static readonly List<ToolSpec> Create = [new("create", "Create a file", """{"type":"object","properties":{"path":{"type":"string"},"file_text":{"type":"string"}},"required":["path","file_text"]}""")];
+    private static readonly List<ToolSpec> Create =
+    [
+        new(
+            "create",
+            "Create a file",
+            """{"type":"object","properties":{"path":{"type":"string"},"file_text":{"type":"string"}},"required":["path","file_text"]}"""
+        ),
+    ];
 
-    private static string Line(string text) => new JsonObject
-    {
-        ["type"] = "stream_event",
-        ["event"] = new JsonObject { ["type"] = "content_block_delta", ["delta"] = new JsonObject { ["type"] = "text_delta", ["text"] = text } },
-    }.ToJsonString();
+    private static string Line(string text) =>
+        new JsonObject
+        {
+            ["type"] = "stream_event",
+            ["event"] = new JsonObject
+            {
+                ["type"] = "content_block_delta",
+                ["delta"] = new JsonObject { ["type"] = "text_delta", ["text"] = text },
+            },
+        }.ToJsonString();
 
     private static (string Text, int Calls, string? Problem) Run(IEnumerable<string> chunks)
     {
         var t = new StreamTranslator(Create);
         var events = new List<CompletionEvent>();
-        foreach (var c in chunks) events.AddRange(t.Feed(Line(c)));
+        foreach (var c in chunks)
+            events.AddRange(t.Feed(Line(c)));
         var turn = t.Complete();
         events.AddRange(turn.Events);
-        return (string.Concat(events.OfType<TextDelta>().Select(e => e.Text)), events.OfType<ToolCallEvent>().Count(), turn.Problem);
+        return (
+            string.Concat(events.OfType<TextDelta>().Select(e => e.Text)),
+            events.OfType<ToolCallEvent>().Count(),
+            turn.Problem
+        );
     }
 
     [Theory]
-    [InlineData("Now creating the workflow.\n\n<tool_call>{\"name\":\"create\",\"arguments\":{\"path\":\"/a/ci.yml\",\"file_text\":\"name: CI\\non:\\n  push: {}\\n\"}}</tool_call>")]
-    [InlineData("<tool_call>{\"name\":\"create\",\"arguments\":{\"path\":\"/a/ci.yml\",\"file_text\":\"x\"}}</tool_call>")]
-    [InlineData("<tool_call>{\"name\":\"create\",\"arguments\":{\"path\":\"/a/ci.yml\",\"file_text\":\"x\"}}")]
-    [InlineData("ok\n<function_calls>\n<tool_call>{\"name\":\"create\",\"arguments\":{\"path\":\"p\",\"file_text\":\"t\"}}</tool_call>\n</function_calls>")]
+    [InlineData(
+        "Now creating the workflow.\n\n<tool_call>{\"name\":\"create\",\"arguments\":{\"path\":\"/a/ci.yml\",\"file_text\":\"name: CI\\non:\\n  push: {}\\n\"}}</tool_call>"
+    )]
+    [InlineData(
+        "<tool_call>{\"name\":\"create\",\"arguments\":{\"path\":\"/a/ci.yml\",\"file_text\":\"x\"}}</tool_call>"
+    )]
+    [InlineData(
+        "<tool_call>{\"name\":\"create\",\"arguments\":{\"path\":\"/a/ci.yml\",\"file_text\":\"x\"}}"
+    )]
+    [InlineData(
+        "ok\n<function_calls>\n<tool_call>{\"name\":\"create\",\"arguments\":{\"path\":\"p\",\"file_text\":\"t\"}}</tool_call>\n</function_calls>"
+    )]
     public void The_call_is_found_for_every_way_the_stream_can_be_chunked(string full)
     {
-        var expectedText = full.StartsWith("Now") ? "Now creating the workflow.\n\n" : full.StartsWith("ok") ? "ok\n" : "";
+        var expectedText =
+            full.StartsWith("Now") ? "Now creating the workflow.\n\n"
+            : full.StartsWith("ok") ? "ok\n"
+            : "";
         // Every pair of split points, so tags, braces and escapes are cut at every possible place.
         for (var i = 0; i <= full.Length; i++)
-            for (var j = i; j <= full.Length; j++)
-            {
-                var (text, calls, problem) = Run([full[..i], full[i..j], full[j..]]);
-                Assert.True(calls == 1 && problem is null && text == expectedText,
-                    $"split at {i},{j}: calls={calls} problem={problem} text=[{text}]");
-            }
+        for (var j = i; j <= full.Length; j++)
+        {
+            var (text, calls, problem) = Run([full[..i], full[i..j], full[j..]]);
+            Assert.True(
+                calls == 1 && problem is null && text == expectedText,
+                $"split at {i},{j}: calls={calls} problem={problem} text=[{text}]"
+            );
+        }
     }
 }
 
 public class BareCallTests
 {
-    private static readonly List<ToolSpec> Tools = [new("create", null, """{"type":"object","properties":{"path":{"type":"string"},"file_text":{"type":"string"}},"required":["path","file_text"]}"""), new("bash", null, null)];
+    private static readonly List<ToolSpec> Tools =
+    [
+        new(
+            "create",
+            null,
+            """{"type":"object","properties":{"path":{"type":"string"},"file_text":{"type":"string"}},"required":["path","file_text"]}"""
+        ),
+        new("bash", null, null),
+    ];
 
-    private static string Line(string text) => new JsonObject
-    {
-        ["type"] = "stream_event",
-        ["event"] = new JsonObject { ["type"] = "content_block_delta", ["delta"] = new JsonObject { ["type"] = "text_delta", ["text"] = text } },
-    }.ToJsonString();
+    private static string Line(string text) =>
+        new JsonObject
+        {
+            ["type"] = "stream_event",
+            ["event"] = new JsonObject
+            {
+                ["type"] = "content_block_delta",
+                ["delta"] = new JsonObject { ["type"] = "text_delta", ["text"] = text },
+            },
+        }.ToJsonString();
 
     private static (string Text, List<ToolCall> Calls, string? Problem) Run(params string[] chunks)
     {
         var t = new StreamTranslator(Tools);
         var events = new List<CompletionEvent>();
-        foreach (var c in chunks) events.AddRange(t.Feed(Line(c)));
+        foreach (var c in chunks)
+            events.AddRange(t.Feed(Line(c)));
         var turn = t.Complete();
         events.AddRange(turn.Events);
-        return (string.Concat(events.OfType<TextDelta>().Select(e => e.Text)), events.OfType<ToolCallEvent>().Select(e => e.Call).ToList(), turn.Problem);
+        return (
+            string.Concat(events.OfType<TextDelta>().Select(e => e.Text)),
+            events.OfType<ToolCallEvent>().Select(e => e.Call).ToList(),
+            turn.Problem
+        );
     }
 
     // Verbatim shape of a real reply: the "<tool" never arrived, the text begins with "_call>{".
-    private const string Mangled = "_call>{\"name\":\"create\",\"arguments\":{\"path\":\"/a/ci.yml\",\"file_text\":\"name: CI\\non: push\\nenv: ${{ github.ref }}\\n\"}}";
+    private const string Mangled =
+        "_call>{\"name\":\"create\",\"arguments\":{\"path\":\"/a/ci.yml\",\"file_text\":\"name: CI\\non: push\\nenv: ${{ github.ref }}\\n\"}}";
 
     [Fact]
     public void A_call_whose_opening_tag_was_mangled_is_still_run_and_the_remnant_is_not_shown()
@@ -500,17 +549,22 @@ public class BareCallTests
     public void The_mangled_call_is_found_for_every_chunking()
     {
         for (var i = 0; i <= Mangled.Length; i++)
-            for (var j = i; j <= Mangled.Length; j++)
-            {
-                var (text, calls, problem) = Run(Mangled[..i], Mangled[i..j], Mangled[j..]);
-                Assert.True(calls.Count == 1 && problem is null && text == "", $"split {i},{j}: calls={calls.Count} text=[{text}] problem={problem}");
-            }
+        for (var j = i; j <= Mangled.Length; j++)
+        {
+            var (text, calls, problem) = Run(Mangled[..i], Mangled[i..j], Mangled[j..]);
+            Assert.True(
+                calls.Count == 1 && problem is null && text == "",
+                $"split {i},{j}: calls={calls.Count} text=[{text}] problem={problem}"
+            );
+        }
     }
 
     [Fact]
     public void Text_before_a_bare_call_is_kept()
     {
-        var (text, calls, _) = Run("Creating it now.\n\n{\"name\":\"bash\",\"arguments\":{\"command\":\"ls\"}}");
+        var (text, calls, _) = Run(
+            "Creating it now.\n\n{\"name\":\"bash\",\"arguments\":{\"command\":\"ls\"}}"
+        );
         Assert.Equal("Creating it now.\n\n", text);
         Assert.Equal("bash", Assert.Single(calls).Name);
     }
@@ -518,7 +572,8 @@ public class BareCallTests
     [Fact]
     public void A_json_example_naming_no_offered_tool_is_ordinary_text()
     {
-        const string prose = "A config looks like {\"name\":\"my-app\",\"version\":\"1\"} in package.json.";
+        const string prose =
+            "A config looks like {\"name\":\"my-app\",\"version\":\"1\"} in package.json.";
         var (text, calls, problem) = Run(prose);
         Assert.Equal(prose, text);
         Assert.Empty(calls);

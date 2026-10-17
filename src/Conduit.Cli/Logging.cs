@@ -5,8 +5,10 @@ namespace Conduit.Cli;
 
 internal static class Logging
 {
-    private const string ConsoleTemplate = "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}";
-    private const string FileTemplate = "{Timestamp:yyyy-MM-dd HH:mm:ss.fff} [{Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}";
+    private const string ConsoleTemplate =
+        "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}";
+    private const string FileTemplate =
+        "{Timestamp:yyyy-MM-dd HH:mm:ss.fff} [{Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}";
 
     /// <summary>
     /// Serilog is the application logger: console for the operator, a rolling file next to the captures for later.
@@ -20,8 +22,12 @@ internal static class Logging
             .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
             .Enrich.FromLogContext()
             .WriteTo.Console(outputTemplate: ConsoleTemplate)
-            .WriteTo.File(Path.Combine(logDirectory, filePrefix + "-.log"),
-                rollingInterval: RollingInterval.Day, retainedFileCountLimit: 14, outputTemplate: FileTemplate)
+            .WriteTo.File(
+                Path.Combine(logDirectory, filePrefix + "-.log"),
+                rollingInterval: RollingInterval.Day,
+                retainedFileCountLimit: 14,
+                outputTemplate: FileTemplate
+            )
             .CreateLogger();
     }
 }

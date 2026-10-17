@@ -23,7 +23,9 @@ public sealed class CaptureSettings : CommandSettings
     public int Port { get; init; } = 8788;
 
     [CommandOption("--lan")]
-    [Description("Listen on all interfaces so another device can reach the server. Requires --key.")]
+    [Description(
+        "Listen on all interfaces so another device can reach the server. Requires --key."
+    )]
     public bool Lan { get; init; }
 
     [CommandOption("--key <KEY>")]
@@ -31,7 +33,9 @@ public sealed class CaptureSettings : CommandSettings
     public string? Key { get; init; }
 
     [CommandOption("-s|--scenario <SCENARIO>")]
-    [Description("Default scenario: text, slow, slow-nokeepalive, progress, reasoning, toolcall, error[-429|-500|-mid], echo. A request can override it with ?scenario=, X-Capture-Scenario, or a model id like capture@slow.")]
+    [Description(
+        "Default scenario: text, slow, slow-nokeepalive, progress, reasoning, toolcall, error[-429|-500|-mid], echo. A request can override it with ?scenario=, X-Capture-Scenario, or a model id like capture@slow."
+    )]
     [DefaultValue("text")]
     public string Scenario { get; init; } = "text";
 
@@ -103,10 +107,14 @@ public sealed class CaptureCommand : AsyncCommand<CaptureSettings>
 {
     public override async Task<int> ExecuteAsync(CommandContext context, CaptureSettings settings)
     {
-        if (settings.Action is null) return await RunServerAsync(settings);
-        if (string.Equals(settings.Action, "report", StringComparison.OrdinalIgnoreCase)) return Report(settings);
+        if (settings.Action is null)
+            return await RunServerAsync(settings);
+        if (string.Equals(settings.Action, "report", StringComparison.OrdinalIgnoreCase))
+            return Report(settings);
 
-        Console.Error.WriteLine($"Unknown action '{settings.Action}'. Use 'conduit capture' or 'conduit capture report'.");
+        Console.Error.WriteLine(
+            $"Unknown action '{settings.Action}'. Use 'conduit capture' or 'conduit capture report'."
+        );
         return 2;
     }
 
@@ -139,14 +147,23 @@ public sealed class CaptureCommand : AsyncCommand<CaptureSettings>
 
         Logging.Configure(options.OutputDirectory, s.Verbose);
         using var cts = new CancellationTokenSource();
-        Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
+        Console.CancelKeyPress += (_, e) =>
+        {
+            e.Cancel = true;
+            cts.Cancel();
+        };
 
         try
         {
-            await CaptureServer.RunAsync(options, logging => logging.AddSerilog(Log.Logger, dispose: false), cts.Token);
+            await CaptureServer.RunAsync(
+                options,
+                logging => logging.AddSerilog(Log.Logger, dispose: false),
+                cts.Token
+            );
             return 0;
         }
-        catch (IOException ex) when (ex.Message.Contains("address already in use", StringComparison.OrdinalIgnoreCase))
+        catch (IOException ex)
+            when (ex.Message.Contains("address already in use", StringComparison.OrdinalIgnoreCase))
         {
             Log.Fatal("Port {Port} is already in use. Pick another with --port.", options.Port);
             return 1;
@@ -175,7 +192,9 @@ public sealed class CaptureCommand : AsyncCommand<CaptureSettings>
 
         if (files.Count == 0)
         {
-            Console.Error.WriteLine($"No capture files found in '{s.Dir}'. Run 'conduit capture' first.");
+            Console.Error.WriteLine(
+                $"No capture files found in '{s.Dir}'. Run 'conduit capture' first."
+            );
             return 1;
         }
         if (files.Any(f => !File.Exists(f)))
@@ -186,7 +205,8 @@ public sealed class CaptureCommand : AsyncCommand<CaptureSettings>
 
         var report = CaptureReport.BuildFromFiles(files);
         Console.WriteLine(report);
-        if (s.Out is not null) File.WriteAllText(s.Out, report);
+        if (s.Out is not null)
+            File.WriteAllText(s.Out, report);
         return 0;
     }
 }

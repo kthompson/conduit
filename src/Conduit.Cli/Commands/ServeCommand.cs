@@ -8,7 +8,9 @@ namespace Conduit.Cli.Commands;
 public class ConfigSettings : CommandSettings
 {
     [CommandOption("-c|--config <PATH>")]
-    [Description("Config file. Default: ~/.config/conduit/conduit.conf (plus instances.d/*.conf beside it).")]
+    [Description(
+        "Config file. Default: ~/.config/conduit/conduit.conf (plus instances.d/*.conf beside it)."
+    )]
     public string? Config { get; init; }
 
     internal string ConfigPath => Config ?? ConduitConfig.DefaultPath;
@@ -36,8 +38,12 @@ public sealed class ServeCommand : AsyncCommand<ServeSettings>
             if (s.Listen is not null)
             {
                 var i = s.Listen.LastIndexOf(':');
-                if (i < 0 || !int.TryParse(s.Listen[(i + 1)..], out var port)) throw new ConfigException("--listen must look like 127.0.0.1:8787.");
-                config = config with { Server = config.Server with { Host = s.Listen[..i], Port = port } };
+                if (i < 0 || !int.TryParse(s.Listen[(i + 1)..], out var port))
+                    throw new ConfigException("--listen must look like 127.0.0.1:8787.");
+                config = config with
+                {
+                    Server = config.Server with { Host = s.Listen[..i], Port = port },
+                };
             }
         }
         catch (ConfigException e)
@@ -48,10 +54,19 @@ public sealed class ServeCommand : AsyncCommand<ServeSettings>
 
         Logging.Configure(Path.Combine(config.Server.DataDirectory, "logs"), s.Verbose, "conduit");
         using var cts = new CancellationTokenSource();
-        Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
+        Console.CancelKeyPress += (_, e) =>
+        {
+            e.Cancel = true;
+            cts.Cancel();
+        };
         try
         {
-            await ConduitServer.RunAsync(config, Drivers.All(), logging => logging.AddSerilog(Log.Logger, dispose: false), cts.Token);
+            await ConduitServer.RunAsync(
+                config,
+                Drivers.All(),
+                logging => logging.AddSerilog(Log.Logger, dispose: false),
+                cts.Token
+            );
             return 0;
         }
         catch (ConfigException e)
@@ -59,9 +74,14 @@ public sealed class ServeCommand : AsyncCommand<ServeSettings>
             Log.Fatal("{Message}", e.Message);
             return 2;
         }
-        catch (IOException e) when (e.Message.Contains("address already in use", StringComparison.OrdinalIgnoreCase))
+        catch (IOException e)
+            when (e.Message.Contains("address already in use", StringComparison.OrdinalIgnoreCase))
         {
-            Log.Fatal("{Host}:{Port} is already in use. Change server.listen or pass --listen.", config.Server.Host, config.Server.Port);
+            Log.Fatal(
+                "{Host}:{Port} is already in use. Change server.listen or pass --listen.",
+                config.Server.Host,
+                config.Server.Port
+            );
             return 1;
         }
         catch (Exception e)

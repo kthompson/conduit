@@ -17,7 +17,11 @@ internal sealed class TestHost : IAsyncDisposable
     {
         _app = app;
         _dir = dir;
-        Http = new HttpClient { BaseAddress = new Uri(ConduitServer.ListeningUrl(app)), Timeout = TimeSpan.FromSeconds(20) };
+        Http = new HttpClient
+        {
+            BaseAddress = new Uri(ConduitServer.ListeningUrl(app)),
+            Timeout = TimeSpan.FromSeconds(20),
+        };
     }
 
     public static readonly string DefaultConfig = """
@@ -26,17 +30,31 @@ internal sealed class TestHost : IAsyncDisposable
         }
         """;
 
-    public static async Task<TestHost> StartAsync(string? hocon = null, IEnumerable<IProviderDriver>? drivers = null, string? apiKey = null)
+    public static async Task<TestHost> StartAsync(
+        string? hocon = null,
+        IEnumerable<IProviderDriver>? drivers = null,
+        string? apiKey = null
+    )
     {
         var dir = Path.Combine(Path.GetTempPath(), "conduit-tests-" + Guid.NewGuid().ToString("N"));
         var keys = apiKey is null ? "" : $"api-keys = [\"{apiKey}\"]";
-        var text = $"server {{ listen = \"127.0.0.1:0\", data-dir = \"{dir.Replace("\\", "/")}\", {keys} }}\n" + (hocon ?? DefaultConfig);
+        var text =
+            $"server {{ listen = \"127.0.0.1:0\", data-dir = \"{dir.Replace("\\", "/")}\", {keys} }}\n"
+            + (hocon ?? DefaultConfig);
         var config = ConduitConfig.Parse(text);
-        var app = ConduitServer.Build(config, drivers ?? [new Conduit.Provider.Fake.FakeDriver()], _ => { });
-        await app.Services.GetService(typeof(ProviderRegistry)).As<ProviderRegistry>().RefreshAllAsync(CancellationToken.None);
+        var app = ConduitServer.Build(
+            config,
+            drivers ?? [new Conduit.Provider.Fake.FakeDriver()],
+            _ => { }
+        );
+        await app
+            .Services.GetService(typeof(ProviderRegistry))
+            .As<ProviderRegistry>()
+            .RefreshAllAsync(CancellationToken.None);
         await app.StartAsync();
         var host = new TestHost(app, dir);
-        if (apiKey is not null) host.Http.DefaultRequestHeaders.Authorization = new("Bearer", apiKey);
+        if (apiKey is not null)
+            host.Http.DefaultRequestHeaders.Authorization = new("Bearer", apiKey);
         return host;
     }
 
@@ -52,18 +70,25 @@ internal sealed class TestHost : IAsyncDisposable
     /// <summary>The <c>data:</c> payloads of an SSE body, in order (comments dropped).</summary>
     public static List<string> SseData(string body) =>
         body.Split("\n\n", StringSplitOptions.RemoveEmptyEntries)
-            .Where(f => f.StartsWith("data: ")).Select(f => f[6..]).ToList();
+            .Where(f => f.StartsWith("data: "))
+            .Select(f => f[6..])
+            .ToList();
 
     public async ValueTask DisposeAsync()
     {
         Http.Dispose();
         await _app.StopAsync();
         await _app.DisposeAsync();
-        try { Directory.Delete(_dir, recursive: true); } catch (IOException) { }
+        try
+        {
+            Directory.Delete(_dir, recursive: true);
+        }
+        catch (IOException) { }
     }
 }
 
 internal static class Cast
 {
-    public static T As<T>(this object? o) where T : class => (T)o!;
+    public static T As<T>(this object? o)
+        where T : class => (T)o!;
 }

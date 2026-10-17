@@ -8,13 +8,15 @@ public class ConfigTests
     public void Parses_server_and_instances_with_env_substitution()
     {
         Environment.SetEnvironmentVariable("CONDUIT_TEST_KEY", "k1");
-        var c = ConduitConfig.Parse("""
+        var c = ConduitConfig.Parse(
+            """
             server { listen = "127.0.0.1:9000", api-keys = [ ${?CONDUIT_TEST_KEY} ] }
             provider-instances {
               claude { driver = claudeAgent, display-name = "Claude", mode = model, environment = [ { name = A, value = b } ], config { binary-path = "/x/claude" } }
               off { driver = fake, enabled = false }
             }
-            """);
+            """
+        );
         Assert.Equal(("127.0.0.1", 9000), (c.Server.Host, c.Server.Port));
         Assert.Equal(["k1"], c.Server.ApiKeys);
         var claude = c.Instances.Single(i => i.InstanceId == "claude");
@@ -51,13 +53,22 @@ public class ConfigTests
     {
         var dir = Path.Combine(Path.GetTempPath(), "conduit-cfg-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(Path.Combine(dir, "instances.d"));
-        File.WriteAllText(Path.Combine(dir, "conduit.conf"), "server { listen = \"127.0.0.1:1234\" }\nprovider-instances { a { driver = fake } }");
-        File.WriteAllText(Path.Combine(dir, "instances.d", "b.conf"), "provider-instances { b { driver = fake } }");
+        File.WriteAllText(
+            Path.Combine(dir, "conduit.conf"),
+            "server { listen = \"127.0.0.1:1234\" }\nprovider-instances { a { driver = fake } }"
+        );
+        File.WriteAllText(
+            Path.Combine(dir, "instances.d", "b.conf"),
+            "provider-instances { b { driver = fake } }"
+        );
         try
         {
             var c = ConduitConfig.Load(Path.Combine(dir, "conduit.conf"));
             Assert.Equal(["a", "b"], c.Instances.Select(i => i.InstanceId).Order());
         }
-        finally { Directory.Delete(dir, recursive: true); }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
     }
 }

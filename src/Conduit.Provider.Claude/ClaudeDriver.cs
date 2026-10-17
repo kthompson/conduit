@@ -229,7 +229,8 @@ internal sealed class ClaudeInstance : IProviderInstance
         }
     }
 
-    private static string Excerpt(string s) => (s.Length <= 700 ? s : s[..700] + "...").ReplaceLineEndings("\\n");
+    private static string Excerpt(string s) =>
+        (s.Length <= 700 ? s : s[..700] + "...").ReplaceLineEndings("\\n");
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }

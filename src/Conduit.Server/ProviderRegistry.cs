@@ -50,7 +50,8 @@ public sealed class ProviderRegistry : IProviderHost
         return dir;
     }
 
-    public void Warn(string instanceId, string message) => _log.LogWarning("{Instance}: {Message}", instanceId, message);
+    public void Warn(string instanceId, string message) =>
+        _log.LogWarning("{Instance}: {Message}", instanceId, message);
 
     /// <summary>Probe every instance once, in parallel. Failures are recorded on the snapshot, not thrown.</summary>
     public async Task RefreshAllAsync(CancellationToken ct)

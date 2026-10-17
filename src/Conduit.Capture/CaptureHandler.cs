@@ -15,11 +15,21 @@ namespace Conduit.Capture;
 /// Handles every request: records it, then answers according to the chosen scenario.
 /// Nothing is routed by the framework, so unknown paths are logged too.
 /// </summary>
-public sealed class CaptureHandler(CaptureOptions options, CaptureStore store, ModelCatalog catalog, ILogger<CaptureHandler> log)
+public sealed class CaptureHandler(
+    CaptureOptions options,
+    CaptureStore store,
+    ModelCatalog catalog,
+    ILogger<CaptureHandler> log
+)
 {
     private static readonly HashSet<string> RedactedHeaders = new(StringComparer.OrdinalIgnoreCase)
     {
-        "authorization", "proxy-authorization", "x-api-key", "api-key", "cookie", "set-cookie",
+        "authorization",
+        "proxy-authorization",
+        "x-api-key",
+        "api-key",
+        "cookie",
+        "set-cookie",
     };
 
     private readonly ConcurrentDictionary<string, long> _lastSeqByBody = new();
@@ -47,7 +57,9 @@ public sealed class CaptureHandler(CaptureOptions options, CaptureStore store, M
             ["remote"] = ctx.Connection.RemoteIpAddress?.ToString(),
             ["httpVersion"] = ctx.Request.Protocol,
             ["wire"] = route.Wire,
-            ["matchedBySuffix"] = route.Wire != "other" && !(ctx.Request.Path.Value ?? "").StartsWith("/v1/", StringComparison.Ordinal),
+            ["matchedBySuffix"] =
+                route.Wire != "other"
+                && !(ctx.Request.Path.Value ?? "").StartsWith("/v1/", StringComparison.Ordinal),
             ["sinceLastRequestMs"] = sinceLast,
         };
         rec["headers"] = HeadersJson(ctx.Request.Headers);
@@ -64,29 +76,54 @@ public sealed class CaptureHandler(CaptureOptions options, CaptureStore store, M
             var raw = await ReadBodyAsync(ctx, rec);
             bodyText = DecodeText(raw, rec);
             JsonNode? json = null;
-            if (bodyText is not null && ctx.Request.ContentLength != 0 && (bodyText.TrimStart().StartsWith('{') || bodyText.TrimStart().StartsWith('[')))
+            if (
+                bodyText is not null
+                && ctx.Request.ContentLength != 0
+                && (bodyText.TrimStart().StartsWith('{') || bodyText.TrimStart().StartsWith('['))
+            )
             {
-                try { json = JsonNode.Parse(bodyText); }
-                catch (JsonException ex) { rec["bodyParseError"] = ex.Message; }
+                try
+                {
+                    json = JsonNode.Parse(bodyText);
+                }
+                catch (JsonException ex)
+                {
+                    rec["bodyParseError"] = ex.Message;
+                }
             }
             rec["body"] = bodyText;
             rec["bodyBytes"] = raw.Length;
-            if (raw.Length > 0) DuplicateInfo(raw, seq, rec);
+            if (raw.Length > 0)
+                DuplicateInfo(raw, seq, rec);
 
             facts = RequestAnalyzer.Analyze(route.Wire, ctx.Request.Headers, json);
             rec["derived"] = facts.Json;
 
             spec = ResolveScenario(ctx, facts);
-            scenarioLabel = route.Wire is "chat" or "responses" or "messages" ? spec.ToString() : "";
+            scenarioLabel = route.Wire is "chat" or "responses" or "messages"
+                ? spec.ToString()
+                : "";
 
-            log.LogInformation("#{Seq} {Method} {Path} wire={Wire} stream={Stream} tools={Tools} paths={Paths} ids={Ids}",
-                seq, ctx.Request.Method, ctx.Request.Path.Value, route.Wire, facts.Stream, facts.ToolCount, facts.PathCount, facts.SessionIdCount);
+            log.LogInformation(
+                "#{Seq} {Method} {Path} wire={Wire} stream={Stream} tools={Tools} paths={Paths} ids={Ids}",
+                seq,
+                ctx.Request.Method,
+                ctx.Request.Path.Value,
+                route.Wire,
+                facts.Stream,
+                facts.ToolCount,
+                facts.PathCount,
+                facts.SessionIdCount
+            );
 
             await DispatchAsync(ctx, route, facts, json, spec, authOk, seq, timing, rec);
-            if (rec["scenario"] is { } s) scenarioLabel = s.ToString();
+            if (rec["scenario"] is { } s)
+                scenarioLabel = s.ToString();
         }
-        catch (Exception ex) when (ex is OperationCanceledException or IOException or BadHttpRequestException
-                                       && (ctx.RequestAborted.IsCancellationRequested || timing.ServerAborted))
+        catch (Exception ex)
+            when (ex is OperationCanceledException or IOException or BadHttpRequestException
+                && (ctx.RequestAborted.IsCancellationRequested || timing.ServerAborted)
+            )
         {
             timing.EndedBy = timing.ServerAborted ? "server_aborted" : "client_aborted";
         }
@@ -100,16 +137,31 @@ public sealed class CaptureHandler(CaptureOptions options, CaptureStore store, M
                 try
                 {
                     ctx.Response.StatusCode = 500;
-                    await ResponseDriver.WriteJsonAsync(ctx, 500,
-                        new JsonObject { ["error"] = new JsonObject { ["message"] = "capture server error: " + ex.Message } }.ToJsonString(),
-                        timing);
+                    await ResponseDriver.WriteJsonAsync(
+                        ctx,
+                        500,
+                        new JsonObject
+                        {
+                            ["error"] = new JsonObject
+                            {
+                                ["message"] = "capture server error: " + ex.Message,
+                            },
+                        }.ToJsonString(),
+                        timing
+                    );
                 }
-                catch { /* the client is gone */ }
+                catch
+                { /* the client is gone */
+                }
             }
         }
         finally
         {
-            if (timing.AbortedAtMs is not null && !timing.ServerAborted && timing.EndedBy == "completed")
+            if (
+                timing.AbortedAtMs is not null
+                && !timing.ServerAborted
+                && timing.EndedBy == "completed"
+            )
                 timing.EndedBy = "client_aborted";
             timing.CompletedMs = timing.NowMs;
             rec["response"] = new JsonObject
@@ -125,20 +177,46 @@ public sealed class CaptureHandler(CaptureOptions options, CaptureStore store, M
                 ["firstByteWrittenMs"] = Round(timing.FirstByteMs),
                 ["completedMs"] = Round(timing.CompletedMs),
                 ["clientAbortedAtMs"] = Round(timing.AbortedAtMs),
-                ["msSinceLastWriteAtAbort"] = timing.AbortedAtMs is { } a && timing.LastWriteMs is { } w ? Round(a - w) : null,
+                ["msSinceLastWriteAtAbort"] =
+                    timing.AbortedAtMs is { } a && timing.LastWriteMs is { } w
+                        ? Round(a - w)
+                        : null,
             };
-            try { store.Append(rec); }
-            catch (Exception ex) { log.LogError(ex, "#{Seq} could not write capture record", seq); }
+            try
+            {
+                store.Append(rec);
+            }
+            catch (Exception ex)
+            {
+                log.LogError(ex, "#{Seq} could not write capture record", seq);
+            }
 
-            log.LogInformation("#{Seq} -> {Status} scenario={Scenario} end={End} firstByte={FirstByte}ms total={Total}ms bytes={Bytes}",
-                seq, ctx.Response.StatusCode, scenarioLabel, timing.EndedBy, Round(timing.FirstByteMs), Round(timing.CompletedMs), timing.BytesWritten);
+            log.LogInformation(
+                "#{Seq} -> {Status} scenario={Scenario} end={End} firstByte={FirstByte}ms total={Total}ms bytes={Bytes}",
+                seq,
+                ctx.Response.StatusCode,
+                scenarioLabel,
+                timing.EndedBy,
+                Round(timing.FirstByteMs),
+                Round(timing.CompletedMs),
+                timing.BytesWritten
+            );
         }
     }
 
     // ---- dispatch ----------------------------------------------------------------------------------------------
 
-    private async Task DispatchAsync(HttpContext ctx, (string Wire, string? ModelId) route, RequestFacts facts, JsonNode? json,
-        ScenarioSpec spec, bool authOk, long seq, RequestTiming timing, JsonObject rec)
+    private async Task DispatchAsync(
+        HttpContext ctx,
+        (string Wire, string? ModelId) route,
+        RequestFacts facts,
+        JsonNode? json,
+        ScenarioSpec spec,
+        bool authOk,
+        long seq,
+        RequestTiming timing,
+        JsonObject rec
+    )
     {
         if (route.Wire == "options")
         {
@@ -151,8 +229,15 @@ public sealed class CaptureHandler(CaptureOptions options, CaptureStore store, M
 
         if (!authOk)
         {
-            await WriteErrorAsync(ctx, route.Wire, 401, "authentication_error", "invalid_api_key",
-                "Capture server: missing or wrong key (the server was started with --key).", timing);
+            await WriteErrorAsync(
+                ctx,
+                route.Wire,
+                401,
+                "authentication_error",
+                "invalid_api_key",
+                "Capture server: missing or wrong key (the server was started with --key).",
+                timing
+            );
             return;
         }
 
@@ -165,72 +250,151 @@ public sealed class CaptureHandler(CaptureOptions options, CaptureStore store, M
             case "model":
                 var model = route.ModelId is null ? null : catalog.Find(route.ModelId);
                 if (model is null)
-                    await WriteErrorAsync(ctx, "other", 404, "invalid_request_error", "model_not_found",
-                        $"The model '{route.ModelId}' does not exist.", timing);
+                    await WriteErrorAsync(
+                        ctx,
+                        "other",
+                        404,
+                        "invalid_request_error",
+                        "model_not_found",
+                        $"The model '{route.ModelId}' does not exist.",
+                        timing
+                    );
                 else
                     await ResponseDriver.WriteJsonAsync(ctx, 200, WireJson.S(model), timing);
                 return;
 
             case "count_tokens":
-                await ResponseDriver.WriteJsonAsync(ctx, 200,
-                    new JsonObject { ["input_tokens"] = Math.Max(1, (json?.ToJsonString().Length ?? 0) / 4) }.ToJsonString(), timing);
+                await ResponseDriver.WriteJsonAsync(
+                    ctx,
+                    200,
+                    new JsonObject
+                    {
+                        ["input_tokens"] = Math.Max(1, (json?.ToJsonString().Length ?? 0) / 4),
+                    }.ToJsonString(),
+                    timing
+                );
                 return;
 
-            case "chat" or "responses" or "messages":
+            case "chat"
+            or "responses"
+            or "messages":
                 await CompletionAsync(ctx, route.Wire, facts, json, spec, seq, timing, rec);
                 return;
 
             default:
-                await WriteErrorAsync(ctx, "other", 404, "invalid_request_error", "not_found",
-                    $"Capture server: no route for {ctx.Request.Method} {ctx.Request.Path}. The request was logged.", timing);
+                await WriteErrorAsync(
+                    ctx,
+                    "other",
+                    404,
+                    "invalid_request_error",
+                    "not_found",
+                    $"Capture server: no route for {ctx.Request.Method} {ctx.Request.Path}. The request was logged.",
+                    timing
+                );
                 return;
         }
     }
 
-    private async Task CompletionAsync(HttpContext ctx, string wire, RequestFacts facts, JsonNode? json, ScenarioSpec spec,
-        long seq, RequestTiming timing, JsonObject rec)
+    private async Task CompletionAsync(
+        HttpContext ctx,
+        string wire,
+        RequestFacts facts,
+        JsonNode? json,
+        ScenarioSpec spec,
+        long seq,
+        RequestTiming timing,
+        JsonObject rec
+    )
     {
         if (json is not JsonObject)
         {
-            await WriteErrorAsync(ctx, wire, 400, "invalid_request_error", "invalid_json",
-                "Capture server: the request body is not a JSON object.", timing);
+            await WriteErrorAsync(
+                ctx,
+                wire,
+                400,
+                "invalid_request_error",
+                "invalid_json",
+                "Capture server: the request body is not a JSON object.",
+                timing
+            );
             return;
         }
 
-        var plan = Scenarios.Plan(spec, new ScenarioContext(facts, options, wire, seq,
-            (int)(spec.Name == "error" ? Interlocked.Increment(ref _errorCycle) - 1 : 0)));
+        var plan = Scenarios.Plan(
+            spec,
+            new ScenarioContext(
+                facts,
+                options,
+                wire,
+                seq,
+                (int)(spec.Name == "error" ? Interlocked.Increment(ref _errorCycle) - 1 : 0)
+            )
+        );
         rec["scenario"] = plan.Label;
 
         if (plan.ErrorStatus is { } status)
         {
-            if (plan.RetryAfterSeconds is { } ra) ctx.Response.Headers.RetryAfter = ra.ToString();
-            await WriteErrorAsync(ctx, wire, status, plan.ErrorType, plan.ErrorCode, plan.ErrorMessage, timing);
+            if (plan.RetryAfterSeconds is { } ra)
+                ctx.Response.Headers.RetryAfter = ra.ToString();
+            await WriteErrorAsync(
+                ctx,
+                wire,
+                status,
+                plan.ErrorType,
+                plan.ErrorCode,
+                plan.ErrorMessage,
+                timing
+            );
             return;
         }
 
-        var prefix = wire switch { "responses" => "resp_", "messages" => "msg_", _ => "chatcmpl-" };
-        var renderer = CreateRenderer(wire, new RenderContext
+        var prefix = wire switch
         {
-            Id = WireJson.NewId(prefix),
-            Model = facts.Model ?? options.Models[0],
-            IncludeUsage = facts.IncludeUsage,
-            PromptTokens = facts.PromptTokensEstimate,
-        });
+            "responses" => "resp_",
+            "messages" => "msg_",
+            _ => "chatcmpl-",
+        };
+        var renderer = CreateRenderer(
+            wire,
+            new RenderContext
+            {
+                Id = WireJson.NewId(prefix),
+                Model = facts.Model ?? options.Models[0],
+                IncludeUsage = facts.IncludeUsage,
+                PromptTokens = facts.PromptTokensEstimate,
+            }
+        );
         await ResponseDriver.RunAsync(ctx, renderer, plan.Events, facts.Stream, options, timing);
     }
 
-    private static IWireRenderer CreateRenderer(string wire, RenderContext c) => wire switch
-    {
-        "responses" => new ResponsesRenderer(c),
-        "messages" => new MessagesRenderer(c),
-        _ => new ChatRenderer(c),
-    };
+    private static IWireRenderer CreateRenderer(string wire, RenderContext c) =>
+        wire switch
+        {
+            "responses" => new ResponsesRenderer(c),
+            "messages" => new MessagesRenderer(c),
+            _ => new ChatRenderer(c),
+        };
 
-    private static async Task WriteErrorAsync(HttpContext ctx, string wire, int status, string type, string code, string message,
-        RequestTiming timing)
+    private static async Task WriteErrorAsync(
+        HttpContext ctx,
+        string wire,
+        int status,
+        string type,
+        string code,
+        string message,
+        RequestTiming timing
+    )
     {
-        IWireRenderer r = wire == "messages" ? new MessagesRenderer(new RenderContext { Id = "", Model = "" }) : new ChatRenderer(new RenderContext { Id = "", Model = "" });
-        await ResponseDriver.WriteJsonAsync(ctx, status, WireJson.S(r.ErrorBody(type, code, message)), timing);
+        IWireRenderer r =
+            wire == "messages"
+                ? new MessagesRenderer(new RenderContext { Id = "", Model = "" })
+                : new ChatRenderer(new RenderContext { Id = "", Model = "" });
+        await ResponseDriver.WriteJsonAsync(
+            ctx,
+            status,
+            WireJson.S(r.ErrorBody(type, code, message)),
+            timing
+        );
     }
 
     // ---- routing and scenario choice ---------------------------------------------------------------------------
@@ -238,28 +402,42 @@ public sealed class CaptureHandler(CaptureOptions options, CaptureStore store, M
     internal static (string Wire, string? ModelId) Route(string method, string path)
     {
         var p = path.TrimEnd('/').ToLowerInvariant();
-        if (method == "OPTIONS") return ("options", null);
+        if (method == "OPTIONS")
+            return ("options", null);
         if (method == "GET")
         {
-            if (p.EndsWith("/models", StringComparison.Ordinal)) return ("models", null);
+            if (p.EndsWith("/models", StringComparison.Ordinal))
+                return ("models", null);
             var i = p.LastIndexOf("/models/", StringComparison.Ordinal);
-            if (i >= 0) return ("model", path.TrimEnd('/')[(i + "/models/".Length)..]);
+            if (i >= 0)
+                return ("model", path.TrimEnd('/')[(i + "/models/".Length)..]);
         }
         if (method == "POST")
         {
-            if (p.EndsWith("/chat/completions", StringComparison.Ordinal)) return ("chat", null);
-            if (p.EndsWith("/responses", StringComparison.Ordinal)) return ("responses", null);
-            if (p.EndsWith("/messages/count_tokens", StringComparison.Ordinal)) return ("count_tokens", null);
-            if (p.EndsWith("/messages", StringComparison.Ordinal)) return ("messages", null);
+            if (p.EndsWith("/chat/completions", StringComparison.Ordinal))
+                return ("chat", null);
+            if (p.EndsWith("/responses", StringComparison.Ordinal))
+                return ("responses", null);
+            if (p.EndsWith("/messages/count_tokens", StringComparison.Ordinal))
+                return ("count_tokens", null);
+            if (p.EndsWith("/messages", StringComparison.Ordinal))
+                return ("messages", null);
         }
         return ("other", null);
     }
 
     private ScenarioSpec ResolveScenario(HttpContext ctx, RequestFacts facts)
     {
-        if (ctx.Request.Query.TryGetValue("scenario", out var q) && q.Count > 0 && !string.IsNullOrEmpty(q[0]))
+        if (
+            ctx.Request.Query.TryGetValue("scenario", out var q)
+            && q.Count > 0
+            && !string.IsNullOrEmpty(q[0])
+        )
             return ScenarioSpec.Parse(q[0]);
-        if (ctx.Request.Headers.TryGetValue("X-Capture-Scenario", out var h) && !string.IsNullOrEmpty(h.ToString()))
+        if (
+            ctx.Request.Headers.TryGetValue("X-Capture-Scenario", out var h)
+            && !string.IsNullOrEmpty(h.ToString())
+        )
             return ScenarioSpec.Parse(h.ToString());
         var (_, fromModel) = ScenarioSpec.SplitModel(facts.Model);
         return fromModel ?? ScenarioSpec.Parse(options.DefaultScenario);
@@ -270,21 +448,27 @@ public sealed class CaptureHandler(CaptureOptions options, CaptureStore store, M
     private double? SinceLastRequest(DateTimeOffset now)
     {
         var prev = Interlocked.Exchange(ref _lastRequestTicks, now.UtcTicks);
-        return prev == 0 ? null : Math.Round(TimeSpan.FromTicks(now.UtcTicks - prev).TotalMilliseconds);
+        return prev == 0
+            ? null
+            : Math.Round(TimeSpan.FromTicks(now.UtcTicks - prev).TotalMilliseconds);
     }
 
     private static JsonObject HeadersJson(IHeaderDictionary headers)
     {
         var o = new JsonObject();
         foreach (var h in headers)
-            o[h.Key.ToLowerInvariant()] = RedactedHeaders.Contains(h.Key) ? "<redacted>" : h.Value.ToString();
+            o[h.Key.ToLowerInvariant()] = RedactedHeaders.Contains(h.Key)
+                ? "<redacted>"
+                : h.Value.ToString();
         return o;
     }
 
     /// <summary>Notes whether and how a key was presented, never the key itself.</summary>
     private JsonObject AuthJson(IHeaderDictionary headers, out bool ok)
     {
-        string? header = null, scheme = null, value = null;
+        string? header = null,
+            scheme = null,
+            value = null;
         var auth = headers.Authorization.ToString();
         if (!string.IsNullOrEmpty(auth))
         {
@@ -295,11 +479,13 @@ public sealed class CaptureHandler(CaptureOptions options, CaptureStore store, M
         }
         else if (headers.TryGetValue("x-api-key", out var xk) && !string.IsNullOrEmpty(xk))
         {
-            header = "x-api-key"; value = xk.ToString();
+            header = "x-api-key";
+            value = xk.ToString();
         }
         else if (headers.TryGetValue("api-key", out var ak) && !string.IsNullOrEmpty(ak))
         {
-            header = "api-key"; value = ak.ToString();
+            header = "api-key";
+            value = ak.ToString();
         }
 
         ok = options.Key is null || (value is not null && FixedTimeEquals(value, options.Key));
@@ -314,7 +500,10 @@ public sealed class CaptureHandler(CaptureOptions options, CaptureStore store, M
     }
 
     private static bool FixedTimeEquals(string a, string b) =>
-        CryptographicOperations.FixedTimeEquals(SHA256.HashData(Encoding.UTF8.GetBytes(a)), SHA256.HashData(Encoding.UTF8.GetBytes(b)));
+        CryptographicOperations.FixedTimeEquals(
+            SHA256.HashData(Encoding.UTF8.GetBytes(a)),
+            SHA256.HashData(Encoding.UTF8.GetBytes(b))
+        );
 
     private async Task<byte[]> ReadBodyAsync(HttpContext ctx, JsonObject rec)
     {
@@ -323,7 +512,8 @@ public sealed class CaptureHandler(CaptureOptions options, CaptureStore store, M
         var raw = ms.ToArray();
 
         var enc = ctx.Request.Headers.ContentEncoding.ToString().ToLowerInvariant();
-        if (raw.Length == 0 || string.IsNullOrEmpty(enc) || enc == "identity") return raw;
+        if (raw.Length == 0 || string.IsNullOrEmpty(enc) || enc == "identity")
+            return raw;
         rec["contentEncoding"] = enc;
         rec["bodyBytesOnWire"] = raw.Length;
         try
@@ -338,7 +528,8 @@ public sealed class CaptureHandler(CaptureOptions options, CaptureStore store, M
             };
             if (dec is null)
             {
-                rec["bodyDecodeError"] = $"unsupported content-encoding '{enc}', body stored as base64";
+                rec["bodyDecodeError"] =
+                    $"unsupported content-encoding '{enc}', body stored as base64";
                 return raw;
             }
             using var outMs = new MemoryStream();
@@ -354,7 +545,8 @@ public sealed class CaptureHandler(CaptureOptions options, CaptureStore store, M
 
     private static string? DecodeText(byte[] raw, JsonObject rec)
     {
-        if (raw.Length == 0) return null;
+        if (raw.Length == 0)
+            return null;
         try
         {
             return new UTF8Encoding(false, throwOnInvalidBytes: true).GetString(raw);
@@ -372,7 +564,8 @@ public sealed class CaptureHandler(CaptureOptions options, CaptureStore store, M
         rec["bodyHash"] = hash;
         var seen = _lastSeqByBody.TryGetValue(hash, out var previous);
         _lastSeqByBody[hash] = seq;
-        if (seen) rec["duplicateOfSeq"] = previous;
+        if (seen)
+            rec["duplicateOfSeq"] = previous;
     }
 
     private static double? Round(double? v) => v is null ? null : Math.Round(v.Value, 1);

@@ -10,7 +10,8 @@ public sealed record ClaudeInvocation(
     IReadOnlyList<string> Args,
     string WorkingDirectory,
     IReadOnlyDictionary<string, string> Env,
-    string? Stdin);
+    string? Stdin
+);
 
 /// <summary>The seam between the driver and the real process, so tests can replay recorded stream-json.</summary>
 public interface IClaudeProcess
@@ -19,21 +20,33 @@ public interface IClaudeProcess
     IAsyncEnumerable<string> RunAsync(ClaudeInvocation invocation, CancellationToken ct);
 
     /// <summary>Run to completion and return stdout. Used by probes only.</summary>
-    Task<(int ExitCode, string Output)> RunToEndAsync(ClaudeInvocation invocation, CancellationToken ct);
+    Task<(int ExitCode, string Output)> RunToEndAsync(
+        ClaudeInvocation invocation,
+        CancellationToken ct
+    );
 }
 
 public sealed class SystemClaudeProcess : IClaudeProcess
 {
-    public async IAsyncEnumerable<string> RunAsync(ClaudeInvocation inv, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    public async IAsyncEnumerable<string> RunAsync(
+        ClaudeInvocation inv,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct
+    )
     {
         using var process = Start(inv);
         // Kill only the process we spawned, and only when the caller goes away or stops reading.
         using var kill = ct.Register(() => TryKill(process));
         var stderr = new StringBuilder();
-        process.ErrorDataReceived += (_, e) => { if (e.Data is not null) lock (stderr) stderr.AppendLine(e.Data); };
+        process.ErrorDataReceived += (_, e) =>
+        {
+            if (e.Data is not null)
+                lock (stderr)
+                    stderr.AppendLine(e.Data);
+        };
         process.BeginErrorReadLine();
 
-        if (inv.Stdin is not null) await process.StandardInput.WriteAsync(inv.Stdin.AsMemory(), ct);
+        if (inv.Stdin is not null)
+            await process.StandardInput.WriteAsync(inv.Stdin.AsMemory(), ct);
         process.StandardInput.Close();
 
         var any = false;
@@ -47,15 +60,22 @@ public sealed class SystemClaudeProcess : IClaudeProcess
         }
         finally
         {
-            if (!process.HasExited) TryKill(process);
+            if (!process.HasExited)
+                TryKill(process);
         }
 
         await process.WaitForExitAsync(CancellationToken.None);
         if (!any && process.ExitCode != 0)
-            throw new ProviderFailure(FailureKind.Failed, $"claude exited with code {process.ExitCode}: {Tail(stderr)}");
+            throw new ProviderFailure(
+                FailureKind.Failed,
+                $"claude exited with code {process.ExitCode}: {Tail(stderr)}"
+            );
     }
 
-    public async Task<(int ExitCode, string Output)> RunToEndAsync(ClaudeInvocation inv, CancellationToken ct)
+    public async Task<(int ExitCode, string Output)> RunToEndAsync(
+        ClaudeInvocation inv,
+        CancellationToken ct
+    )
     {
         using var process = Start(inv);
         using var kill = ct.Register(() => TryKill(process));
@@ -75,19 +95,35 @@ public sealed class SystemClaudeProcess : IClaudeProcess
             RedirectStandardError = true,
             UseShellExecute = false,
         };
-        foreach (var a in inv.Args) psi.ArgumentList.Add(a);
-        foreach (var (k, v) in inv.Env) psi.Environment[k] = v;
-        try { return Process.Start(psi) ?? throw new ProviderFailure(FailureKind.Unavailable, $"Could not start '{inv.Binary}'."); }
+        foreach (var a in inv.Args)
+            psi.ArgumentList.Add(a);
+        foreach (var (k, v) in inv.Env)
+            psi.Environment[k] = v;
+        try
+        {
+            return Process.Start(psi)
+                ?? throw new ProviderFailure(
+                    FailureKind.Unavailable,
+                    $"Could not start '{inv.Binary}'."
+                );
+        }
         catch (System.ComponentModel.Win32Exception e)
         {
-            throw new ProviderFailure(FailureKind.Unavailable,
-                $"Could not run '{inv.Binary}'. Is Claude Code installed and on PATH? Otherwise set config {{ binary-path = \"/full/path/to/claude\" }} on the instance.", inner: e);
+            throw new ProviderFailure(
+                FailureKind.Unavailable,
+                $"Could not run '{inv.Binary}'. Is Claude Code installed and on PATH? Otherwise set config {{ binary-path = \"/full/path/to/claude\" }} on the instance.",
+                inner: e
+            );
         }
     }
 
     private static void TryKill(Process p)
     {
-        try { if (!p.HasExited) p.Kill(entireProcessTree: true); }
+        try
+        {
+            if (!p.HasExited)
+                p.Kill(entireProcessTree: true);
+        }
         catch (InvalidOperationException) { }
     }
 

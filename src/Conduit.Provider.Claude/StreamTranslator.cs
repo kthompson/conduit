@@ -272,15 +272,33 @@ public sealed partial class StreamTranslator(IReadOnlyList<ToolSpec> tools, bool
     private static partial Regex BareStart();
 
     /// <summary>What a mangled opening tag leaves in front of a bare call, such as "_call>".</summary>
-    [GeneratedRegex(@"(?:</?\s*)?(?:tool|function)?_?(?:calls?|use|invoke)\s*>\s*$", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(
+        @"(?:</?\s*)?(?:tool|function)?_?(?:calls?|use|invoke)\s*>\s*$",
+        RegexOptions.IgnoreCase
+    )]
     private static partial Regex TagRemnant();
 
     private static readonly string[] Remnants =
     [
-        "tool_call>", "_call>", "call>", "function_calls>", "function_call>", "_calls>", "calls>", "tool_use>", "_use>", "use>", "invoke>",
+        "tool_call>",
+        "_call>",
+        "call>",
+        "function_calls>",
+        "function_call>",
+        "_calls>",
+        "calls>",
+        "tool_use>",
+        "_use>",
+        "use>",
+        "invoke>",
     ];
 
-    private static readonly string[] BarePrefixes = ["{\"name\":\"", "{\"tool\":\"", "{\"tool_name\":\""];
+    private static readonly string[] BarePrefixes =
+    [
+        "{\"name\":\"",
+        "{\"tool\":\"",
+        "{\"tool_name\":\"",
+    ];
 
     /// <summary>The index just past the object that opens at the start of <paramref name="s"/>, or -1 while it is still open.</summary>
     private static int ObjectEnd(string s)
@@ -314,7 +332,10 @@ public sealed partial class StreamTranslator(IReadOnlyList<ToolSpec> tools, bool
     /// <summary>A bare object counts as a call only if it names an offered tool; otherwise it was just text that looked like one.</summary>
     private IEnumerable<CompletionEvent> BareBlock(string block)
     {
-        var found = ToolCallParser.Parse(block, tools).Where(c => tools.Any(t => t.Name == c.Name)).ToList();
+        var found = ToolCallParser
+            .Parse(block, tools)
+            .Where(c => tools.Any(t => t.Name == c.Name))
+            .ToList();
         if (found.Count > 0)
         {
             _calls.AddRange(found);

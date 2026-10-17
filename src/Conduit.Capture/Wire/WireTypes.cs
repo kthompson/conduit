@@ -8,19 +8,21 @@ namespace Conduit.Capture.Wire;
 /// <summary>Which on-the-wire shape a reasoning delta takes. Renderers ignore shapes that are not theirs.</summary>
 public enum ReasoningShape
 {
-    ChatReasoningContent,   // delta.reasoning_content   (DeepSeek and most OpenAI-compatible servers)
-    ChatReasoning,          // delta.reasoning           (OpenRouter and others)
-    ChatReasoningDetails,   // delta.reasoning_details[] (OpenRouter structured form)
-    ResponsesSummary,       // response.reasoning_summary_text.delta
-    ResponsesText,          // response.reasoning_text.delta
-    AnthropicThinking,      // content_block thinking + thinking_delta
+    ChatReasoningContent, // delta.reasoning_content   (DeepSeek and most OpenAI-compatible servers)
+    ChatReasoning, // delta.reasoning           (OpenRouter and others)
+    ChatReasoningDetails, // delta.reasoning_details[] (OpenRouter structured form)
+    ResponsesSummary, // response.reasoning_summary_text.delta
+    ResponsesText, // response.reasoning_text.delta
+    AnthropicThinking, // content_block thinking + thinking_delta
 }
 
 /// <summary>Wire-neutral description of what a scenario "says". Renderers turn these into a protocol.</summary>
 public abstract record ScriptEvent;
 
 public sealed record TextDelta(string Text) : ScriptEvent;
+
 public sealed record ReasoningDelta(string Text, ReasoningShape Shape) : ScriptEvent;
+
 public sealed record ToolCallEvent(string Id, string Name, string ArgumentsJson) : ScriptEvent;
 
 /// <summary>Wait before the next event. When <paramref name="KeepAlive"/> is set, SSE comments are sent while waiting.</summary>
@@ -38,10 +40,12 @@ public sealed record SseFrame(string? Event, string? Data, string? Comment = nul
     public byte[] ToBytes()
     {
         var sb = new System.Text.StringBuilder();
-        if (Comment is not null) sb.Append(": ").Append(Comment).Append("\n\n");
+        if (Comment is not null)
+            sb.Append(": ").Append(Comment).Append("\n\n");
         else
         {
-            if (Event is not null) sb.Append("event: ").Append(Event).Append('\n');
+            if (Event is not null)
+                sb.Append("event: ").Append(Event).Append('\n');
             sb.Append("data: ").Append(Data).Append("\n\n");
         }
         return System.Text.Encoding.UTF8.GetBytes(sb.ToString());
@@ -86,7 +90,8 @@ internal static class WireJson
     {
         const string alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
         Span<char> chars = stackalloc char[length];
-        for (var i = 0; i < length; i++) chars[i] = alphabet[RandomNumberGenerator.GetInt32(alphabet.Length)];
+        for (var i = 0; i < length; i++)
+            chars[i] = alphabet[RandomNumberGenerator.GetInt32(alphabet.Length)];
         return prefix + new string(chars);
     }
 

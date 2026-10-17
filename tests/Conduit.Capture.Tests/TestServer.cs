@@ -18,7 +18,11 @@ internal sealed class TestServer : IAsyncDisposable
         _app = app;
         _dir = dir;
         CaptureFile = CaptureServer.CaptureFile(app);
-        Http = new HttpClient { BaseAddress = new Uri(CaptureServer.ListeningUrl(app)), Timeout = TimeSpan.FromSeconds(20) };
+        Http = new HttpClient
+        {
+            BaseAddress = new Uri(CaptureServer.ListeningUrl(app)),
+            Timeout = TimeSpan.FromSeconds(20),
+        };
     }
 
     public static async Task<TestServer> StartAsync(Action<CaptureOptions>? configure = null)
@@ -38,15 +42,19 @@ internal sealed class TestServer : IAsyncDisposable
         return new TestServer(app, dir);
     }
 
-    public static StringContent Json(string json) => new(json, System.Text.Encoding.UTF8, "application/json");
+    public static StringContent Json(string json) =>
+        new(json, System.Text.Encoding.UTF8, "application/json");
 
     /// <summary>Records are written just after the response completes, so poll briefly.</summary>
     public async Task<IReadOnlyList<JsonObject>> RecordsAsync(int expected)
     {
         for (var i = 0; i < 100; i++)
         {
-            var lines = File.Exists(CaptureFile) ? File.ReadAllLines(CaptureFile).Where(l => l.Length > 0).ToList() : [];
-            if (lines.Count >= expected) return lines.Select(l => (JsonObject)JsonNode.Parse(l)!).ToList();
+            var lines = File.Exists(CaptureFile)
+                ? File.ReadAllLines(CaptureFile).Where(l => l.Length > 0).ToList()
+                : [];
+            if (lines.Count >= expected)
+                return lines.Select(l => (JsonObject)JsonNode.Parse(l)!).ToList();
             await Task.Delay(50);
         }
         throw new TimeoutException($"Expected {expected} capture records.");
@@ -57,6 +65,10 @@ internal sealed class TestServer : IAsyncDisposable
         Http.Dispose();
         await _app.StopAsync();
         await _app.DisposeAsync();
-        try { Directory.Delete(_dir, recursive: true); } catch (IOException) { }
+        try
+        {
+            Directory.Delete(_dir, recursive: true);
+        }
+        catch (IOException) { }
     }
 }

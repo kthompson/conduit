@@ -55,8 +55,10 @@ public sealed class CaptureOptions
     {
         get
         {
-            if (Lan) return IPAddress.Any;
-            if (string.Equals(Host, "localhost", StringComparison.OrdinalIgnoreCase)) return IPAddress.Loopback;
+            if (Lan)
+                return IPAddress.Any;
+            if (string.Equals(Host, "localhost", StringComparison.OrdinalIgnoreCase))
+                return IPAddress.Loopback;
             return IPAddress.TryParse(Host, out var ip) ? ip : IPAddress.Loopback;
         }
     }
@@ -64,16 +66,24 @@ public sealed class CaptureOptions
     /// <summary>Returns an error message, or null if the options are usable.</summary>
     public string? Validate()
     {
-        if (Port is < 0 or > 65535) return $"Port {Port} is out of range.";
-        if (!string.Equals(Host, "localhost", StringComparison.OrdinalIgnoreCase) && !IPAddress.TryParse(Host, out _))
+        if (Port is < 0 or > 65535)
+            return $"Port {Port} is out of range.";
+        if (
+            !string.Equals(Host, "localhost", StringComparison.OrdinalIgnoreCase)
+            && !IPAddress.TryParse(Host, out _)
+        )
             return $"Host '{Host}' is not an IP address or 'localhost'.";
         var exposed = Lan || !IsLoopbackHost;
         if (exposed && string.IsNullOrEmpty(Key))
             return "Listening beyond loopback (--lan or a non-loopback --host) requires --key.";
-        if (Models.Count == 0) return "At least one model id is required.";
-        if (SlowChunks < 1) return "SlowChunks must be at least 1.";
-        if (SlowPause < TimeSpan.Zero || KeepAliveInterval <= TimeSpan.Zero) return "Pause/interval durations must be positive.";
-        if (ModelsFile is not null && !File.Exists(ModelsFile)) return $"Models file '{ModelsFile}' does not exist.";
+        if (Models.Count == 0)
+            return "At least one model id is required.";
+        if (SlowChunks < 1)
+            return "SlowChunks must be at least 1.";
+        if (SlowPause < TimeSpan.Zero || KeepAliveInterval <= TimeSpan.Zero)
+            return "Pause/interval durations must be positive.";
+        if (ModelsFile is not null && !File.Exists(ModelsFile))
+            return $"Models file '{ModelsFile}' does not exist.";
         return null;
     }
 
