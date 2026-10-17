@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>conduit</AssemblyName>
+    <RootNamespace>Conduit.Cli</RootNamespace>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>conduit</ToolCommandName>
+  </PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Serilog.AspNetCore" Version="9.0.0" />
+    <PackageReference Include="Spectre.Console.Cli" Version="0.49.1" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Conduit.Capture\Conduit.Capture.csproj" />
+  </ItemGroup>
+</Project>

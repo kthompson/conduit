@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Conduit.Capture/Conduit.Capture.csproj" />
+    <Project Path="src/Conduit.Cli/Conduit.Cli.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Conduit.Capture.Tests/Conduit.Capture.Tests.csproj" />
+  </Folder>
+</Solution>
