@@ -204,6 +204,28 @@ public class ToolCallHardeningTests
     }
 
     [Fact]
+    public void A_call_missing_its_final_closing_brace_is_repaired_and_runs()
+    {
+        // Verbatim from a real reply: the outer object is never closed before </tool_call>.
+        var (events, turn) = Run(["<tool_call>{\"name\":\"bash\",\"arguments\":{\"command\":\"cd /x && export PATH=/tmp/d:$PATH && dotnet publish 2>&1 | tail -60\",\"description\":\"Test publish\",\"initial_wait\":180}</tool_call>"]);
+        var args = JsonNode.Parse(OnlyCall(events).ArgumentsJson)!;
+        Assert.Equal("cd /x && export PATH=/tmp/d:$PATH && dotnet publish 2>&1 | tail -60", args["command"]!.GetValue<string>());
+        Assert.Equal(180, args["initial_wait"]!.GetValue<int>());
+        Assert.Null(turn.Problem);
+        Assert.Empty(events.OfType<TextDelta>());
+    }
+
+    [Fact]
+    public async Task An_unreadable_block_that_survives_the_retry_is_shown_exactly_once()
+    {
+        // The user saw the raw block twice: once per attempt. It must now be held until the last attempt and shown once.
+        var (events, p) = await Complete(_ => [Line("<tool_call>this is not json at all</tool_call>")]);
+        Assert.Equal(2, p.Runs.Count);
+        Assert.Equal("<tool_call>this is not json at all</tool_call>", string.Concat(events.OfType<TextDelta>().Select(e => e.Text)));
+        Assert.Empty(events.OfType<ToolCallEvent>());
+    }
+
+    [Fact]
     public async Task A_valid_call_is_not_retried()
     {
         var (_, p) = await Complete(_ => [Line("<tool_call>{\"name\":\"view\",\"arguments\":{\"path\":\"a\"}}</tool_call>")]);

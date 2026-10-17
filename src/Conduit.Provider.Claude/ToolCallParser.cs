@@ -117,13 +117,14 @@ public static partial class ToolCallParser
         return missing.Count == 0 ? null : $"the call to '{call.Name}' is missing required argument(s): {string.Join(", ", missing)}";
     }
 
-    /// <summary>Balanced <c>{..}</c> objects in order, string-aware. A stray closing brace or unterminated object is skipped.</summary>
+    /// <summary>Balanced <c>{..}</c> objects in order, string-aware. A stray closing brace is skipped; an object left open at the end is closed.</summary>
     private static IEnumerable<string> TopLevelObjects(string s)
     {
         var depth = 0;
         var start = -1;
         var inString = false;
         var escaped = false;
+        var lastClose = -1;
         for (var i = 0; i < s.Length; i++)
         {
             var c = s[i];
@@ -142,10 +143,13 @@ public static partial class ToolCallParser
                     break;
                 case '}':
                     if (depth == 0) break;
+                    lastClose = i;
                     if (--depth == 0) yield return s[start..(i + 1)];
                     break;
             }
         }
+        // The model sometimes drops the last closing brace(s). Close what is open; the caller keeps it only if it then parses.
+        if (depth > 0 && start >= 0 && lastClose > start) yield return s[start..(lastClose + 1)] + new string('}', depth);
     }
 
     private static JsonNode? TryParse(string json)

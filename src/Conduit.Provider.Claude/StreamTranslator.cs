@@ -22,6 +22,7 @@ public sealed partial class StreamTranslator(IReadOnlyList<ToolSpec> tools, bool
     private readonly StringBuilder _raw = new();
     private readonly List<ToolCall> _calls = [];
     private readonly List<string> _held = [];
+    private readonly List<string> _unreadable = [];
     private bool _inTool;
     private bool _unparsedBlock;
     private int _inputTokens, _outputTokens;
@@ -179,9 +180,11 @@ public sealed partial class StreamTranslator(IReadOnlyList<ToolSpec> tools, bool
             _calls.AddRange(found);
             yield break;
         }
-        // A tag with nothing runnable inside: show it (once, before any good call) rather than lose it, and remember it was a failed attempt.
+        // A tag with nothing runnable inside. Remember it was a failed attempt. It is not streamed now, because a retry may fix it;
+        // if no attempt does, <see cref="Complete"/> returns it as text so it is shown once rather than lost.
         _unparsedBlock = true;
-        foreach (var e in Emit(block)) yield return e;
+        if (_calls.Count == 0) _unreadable.Add(block);
+        else foreach (var e in Emit(block)) yield return e;
     }
 
     /// <summary>Text goes out live, is held for a retry attempt, or (after a tool call) is dropped and ends the turn.</summary>
@@ -224,6 +227,7 @@ public sealed partial class StreamTranslator(IReadOnlyList<ToolSpec> tools, bool
 
         var problem = Validate();
         if (_calls.Count == 0) events.AddRange(_held.Select(h => (CompletionEvent)new TextDelta(h)));
+        if (_calls.Count == 0) events.AddRange(_unreadable.Select(h => (CompletionEvent)new TextDelta(h)));
         events.AddRange(_calls.Select(c => new ToolCallEvent(c)));
         events.Add(new UsageEvent(_inputTokens, _outputTokens));
         events.Add(new Finish(_calls.Count > 0 ? FinishReason.ToolCalls : _truncated ? FinishReason.Length : FinishReason.Stop));
