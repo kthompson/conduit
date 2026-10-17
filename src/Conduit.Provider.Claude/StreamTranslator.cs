@@ -7,7 +7,13 @@ using Conduit.Provider.Core;
 namespace Conduit.Provider.Claude;
 
 /// <summary>What one run produced: the events to send, why they are not trustworthy (if they are not), and the raw reply for a retry.</summary>
-public sealed record TranslatedTurn(IReadOnlyList<CompletionEvent> Events, string? Problem, string RawReply, int PromptTokens, int CompletionTokens);
+public sealed record TranslatedTurn(
+    IReadOnlyList<CompletionEvent> Events,
+    string? Problem,
+    string RawReply,
+    int PromptTokens,
+    int CompletionTokens
+);
 
 /// <summary>
 /// Reads <c>claude --output-format stream-json --include-partial-messages</c> lines and produces the internal item stream.
@@ -24,8 +30,10 @@ public sealed partial class StreamTranslator(IReadOnlyList<ToolSpec> tools, bool
     private readonly List<string> _held = [];
     private readonly List<string> _unreadable = [];
     private bool _inTool;
+    private bool _inBare;
     private bool _unparsedBlock;
-    private int _inputTokens, _outputTokens;
+    private int _inputTokens,
+        _outputTokens;
     private bool _truncated;
     private string? _error;
     private TimeSpan? _retryAfter;
@@ -40,30 +48,47 @@ public sealed partial class StreamTranslator(IReadOnlyList<ToolSpec> tools, bool
     /// <summary>Feed one stdout line. Returns the text and reasoning to send right now.</summary>
     public IEnumerable<CompletionEvent> Feed(string line)
     {
-        if (Stopped) yield break;
+        if (Stopped)
+            yield break;
         JsonNode? node;
-        try { node = JsonNode.Parse(line); }
-        catch (JsonException) { yield break; }
-        if (node is not JsonObject o) yield break;
+        try
+        {
+            node = JsonNode.Parse(line);
+        }
+        catch (JsonException)
+        {
+            yield break;
+        }
+        if (node is not JsonObject o)
+            yield break;
 
         switch (o["type"]?.GetValue<string>())
         {
             case "stream_event":
-                foreach (var e in Event(o["event"] as JsonObject)) yield return e;
+                foreach (var e in Event(o["event"] as JsonObject))
+                    yield return e;
                 break;
 
             case "rate_limit_event":
-                if (o["rate_limit_info"] is JsonObject info && info["status"]?.GetValue<string>() == "rejected")
+                if (
+                    o["rate_limit_info"] is JsonObject info
+                    && info["status"]?.GetValue<string>() == "rejected"
+                )
                 {
                     _limited = true;
                     if (info["resetsAt"]?.GetValue<long>() is { } at)
-                        _retryAfter = TimeSpan.FromSeconds(Math.Max(1, at - DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
+                        _retryAfter = TimeSpan.FromSeconds(
+                            Math.Max(1, at - DateTimeOffset.UtcNow.ToUnixTimeSeconds())
+                        );
                 }
                 break;
 
             case "result":
                 if (o["is_error"]?.GetValue<bool>() == true)
-                    _error = o["result"]?.GetValue<string>() ?? o["terminal_reason"]?.GetValue<string>() ?? "claude reported an error";
+                    _error =
+                        o["result"]?.GetValue<string>()
+                        ?? o["terminal_reason"]?.GetValue<string>()
+                        ?? "claude reported an error";
                 break;
         }
     }
@@ -77,38 +102,49 @@ public sealed partial class StreamTranslator(IReadOnlyList<ToolSpec> tools, bool
                 switch (delta?["type"]?.GetValue<string>())
                 {
                     case "text_delta":
-                        foreach (var e in Text(delta["text"]?.GetValue<string>() ?? "")) yield return e;
+                        foreach (var e in Text(delta["text"]?.GetValue<string>() ?? ""))
+                            yield return e;
                         break;
                     case "thinking_delta":
-                        if (!bufferText && delta["thinking"]?.GetValue<string>() is { Length: > 0 } th) yield return new ReasoningDelta(th);
+                        if (
+                            !bufferText
+                            && delta["thinking"]?.GetValue<string>() is { Length: > 0 } th
+                        )
+                            yield return new ReasoningDelta(th);
                         break;
                 }
                 break;
 
             case "message_start":
-                if (ev["message"]?["usage"] is JsonObject start) _inputTokens = InputTokens(start);
+                if (ev["message"]?["usage"] is JsonObject start)
+                    _inputTokens = InputTokens(start);
                 break;
 
             case "message_delta":
                 if (ev["usage"] is JsonObject u)
                 {
-                    if (InputTokens(u) is > 0 and var inTok) _inputTokens = inTok;
+                    if (InputTokens(u) is > 0 and var inTok)
+                        _inputTokens = inTok;
                     _outputTokens = u["output_tokens"]?.GetValue<int>() ?? _outputTokens;
                 }
-                if (ev["delta"]?["stop_reason"]?.GetValue<string>() == "max_tokens") _truncated = true;
+                if (ev["delta"]?["stop_reason"]?.GetValue<string>() == "max_tokens")
+                    _truncated = true;
                 break;
         }
     }
 
     private static int InputTokens(JsonObject u) =>
-        (u["input_tokens"]?.GetValue<int>() ?? 0) + (u["cache_creation_input_tokens"]?.GetValue<int>() ?? 0) + (u["cache_read_input_tokens"]?.GetValue<int>() ?? 0);
+        (u["input_tokens"]?.GetValue<int>() ?? 0)
+        + (u["cache_creation_input_tokens"]?.GetValue<int>() ?? 0)
+        + (u["cache_read_input_tokens"]?.GetValue<int>() ?? 0);
 
     private IEnumerable<CompletionEvent> Text(string chunk)
     {
         _raw.Append(chunk);
         if (!_parse)
         {
-            foreach (var e in Emit(chunk)) yield return e;
+            foreach (var e in Emit(chunk))
+                yield return e;
             yield break;
         }
 
@@ -116,35 +152,65 @@ public sealed partial class StreamTranslator(IReadOnlyList<ToolSpec> tools, bool
         while (!Stopped)
         {
             var s = _buf.ToString();
+            if (_inBare)
+            {
+                var endBare = ObjectEnd(s);
+                if (endBare < 0)
+                    yield break;
+                _buf.Clear().Append(s[endBare..]);
+                _inBare = false;
+                foreach (var e in BareBlock(s[..endBare]))
+                    yield return e;
+                continue;
+            }
+
             if (!_inTool)
             {
                 var open = OpenTag(s);
+                var bare = BareStart().Match(s);
+                if (bare.Success && (open is null || bare.Index < open.Index))
+                {
+                    // No usable tag (the opening one was mangled, e.g. the text starts with "_call>{"): still a call if it names an offered tool.
+                    var before = TagRemnant().Replace(s[..bare.Index], "");
+                    foreach (var e in Emit(before))
+                        yield return e;
+                    _buf.Clear().Append(s[bare.Index..]);
+                    _inBare = true;
+                    continue;
+                }
                 if (open is not null)
                 {
-                    foreach (var e in Emit(s[..open.Index])) yield return e;
+                    foreach (var e in Emit(s[..open.Index]))
+                        yield return e;
                     _buf.Clear().Append(s[open.Index..]);
                     _inTool = true;
                     continue;
                 }
                 // Hold back a tail that could be the start of a tag split across chunks.
                 var keep = PartialTagLength(s);
-                if (s.Length > keep) foreach (var e in Emit(s[..^keep])) yield return e;
-                if (!Stopped) _buf.Clear().Append(s[^keep..]);
+                if (s.Length > keep)
+                    foreach (var e in Emit(s[..^keep]))
+                        yield return e;
+                if (!Stopped)
+                    _buf.Clear().Append(s[^keep..]);
                 yield break;
             }
 
             var end = BlockEnd(s);
-            if (end < 0) yield break;
+            if (end < 0)
+                yield break;
             _buf.Clear().Append(s[end..]);
             _inTool = false;
-            foreach (var e in Block(s[..end])) yield return e;
+            foreach (var e in Block(s[..end]))
+                yield return e;
         }
     }
 
     private static Match? OpenTag(string s)
     {
         foreach (Match m in ToolCallParser.Tag.Matches(s))
-            if (m.Groups[1].Length == 0 && !m.Value.EndsWith("/>")) return m;
+            if (m.Groups[1].Length == 0 && !m.Value.EndsWith("/>"))
+                return m;
         return null;
     }
 
@@ -154,23 +220,109 @@ public sealed partial class StreamTranslator(IReadOnlyList<ToolSpec> tools, bool
         var depth = 0;
         foreach (Match m in ToolCallParser.Tag.Matches(s))
         {
-            if (m.Value.EndsWith("/>")) continue;
+            if (m.Value.EndsWith("/>"))
+                continue;
             depth += m.Groups[1].Length == 0 ? 1 : -1;
-            if (depth <= 0) return m.Index + m.Length;
+            if (depth <= 0)
+                return m.Index + m.Length;
         }
         return -1;
     }
 
     private static int PartialTagLength(string s)
     {
+        var keep = 0;
         var i = s.LastIndexOf('<');
-        if (i < 0) return 0;
-        var tail = s[i..];
-        return tail.Length <= 64 && !tail.Contains('>') && PartialTag().IsMatch(tail) ? tail.Length : 0;
+        if (i >= 0)
+        {
+            var tail = s[i..];
+            if (tail.Length <= 64 && !tail.Contains('>') && PartialTag().IsMatch(tail))
+                keep = tail.Length;
+        }
+
+        // A tail like "_ca" could be what a mangled opening tag leaves in front of a bare call; hold it so it can be dropped with the rest.
+        for (var n = Math.Min(16, s.Length); n > keep; n--)
+            if (Remnants.Any(r => r.StartsWith(s[^n..], StringComparison.OrdinalIgnoreCase)))
+            {
+                keep = n;
+                break;
+            }
+
+        // A tail like {"na could be the start of a bare call.
+        var b = s.LastIndexOf('{');
+        if (b >= 0 && s.Length - b <= 16)
+        {
+            var compact = new string(s[b..].Where(c => !char.IsWhiteSpace(c)).ToArray());
+            if (BarePrefixes.Any(p => p.StartsWith(compact, StringComparison.Ordinal)))
+            {
+                keep = Math.Max(keep, s.Length - b);
+                // The remnant of a mangled tag in front of it goes too, so hold that as well.
+                if (TagRemnant().Match(s[..b]) is { Success: true } remnant)
+                    keep = Math.Max(keep, s.Length - remnant.Index);
+            }
+        }
+        return keep;
     }
 
     [GeneratedRegex(@"^</?[A-Za-z_]*(\s[^>]*)?$")]
     private static partial Regex PartialTag();
+
+    /// <summary>The start of a call written with no usable tag: {"name":"..</summary>
+    [GeneratedRegex(@"\{\s*""(?:name|tool|tool_name)""\s*:\s*""")]
+    private static partial Regex BareStart();
+
+    /// <summary>What a mangled opening tag leaves in front of a bare call, such as "_call>".</summary>
+    [GeneratedRegex(@"(?:</?\s*)?(?:tool|function)?_?(?:calls?|use|invoke)\s*>\s*$", RegexOptions.IgnoreCase)]
+    private static partial Regex TagRemnant();
+
+    private static readonly string[] Remnants =
+    [
+        "tool_call>", "_call>", "call>", "function_calls>", "function_call>", "_calls>", "calls>", "tool_use>", "_use>", "use>", "invoke>",
+    ];
+
+    private static readonly string[] BarePrefixes = ["{\"name\":\"", "{\"tool\":\"", "{\"tool_name\":\""];
+
+    /// <summary>The index just past the object that opens at the start of <paramref name="s"/>, or -1 while it is still open.</summary>
+    private static int ObjectEnd(string s)
+    {
+        var depth = 0;
+        var inString = false;
+        var escaped = false;
+        for (var i = 0; i < s.Length; i++)
+        {
+            var c = s[i];
+            if (inString)
+            {
+                if (escaped)
+                    escaped = false;
+                else if (c == '\\')
+                    escaped = true;
+                else if (c == '"')
+                    inString = false;
+                continue;
+            }
+            if (c == '"')
+                inString = true;
+            else if (c == '{')
+                depth++;
+            else if (c == '}' && --depth == 0)
+                return i + 1;
+        }
+        return -1;
+    }
+
+    /// <summary>A bare object counts as a call only if it names an offered tool; otherwise it was just text that looked like one.</summary>
+    private IEnumerable<CompletionEvent> BareBlock(string block)
+    {
+        var found = ToolCallParser.Parse(block, tools).Where(c => tools.Any(t => t.Name == c.Name)).ToList();
+        if (found.Count > 0)
+        {
+            _calls.AddRange(found);
+            yield break;
+        }
+        foreach (var e in Emit(block))
+            yield return e;
+    }
 
     private IEnumerable<CompletionEvent> Block(string block)
     {
@@ -183,21 +335,31 @@ public sealed partial class StreamTranslator(IReadOnlyList<ToolSpec> tools, bool
         // A tag with nothing runnable inside. Remember it was a failed attempt. It is not streamed now, because a retry may fix it;
         // if no attempt does, <see cref="Complete"/> returns it as text so it is shown once rather than lost.
         _unparsedBlock = true;
-        if (_calls.Count == 0) _unreadable.Add(block);
-        else foreach (var e in Emit(block)) yield return e;
+        if (_calls.Count == 0)
+            _unreadable.Add(block);
+        else
+            foreach (var e in Emit(block))
+                yield return e;
     }
 
     /// <summary>Text goes out live, is held for a retry attempt, or (after a tool call) is dropped and ends the turn.</summary>
     private IEnumerable<CompletionEvent> Emit(string text)
     {
-        if (text.Length == 0) yield break;
+        if (text.Length == 0)
+            yield break;
         if (_calls.Count > 0)
         {
-            if (text.Trim().Length > 0) { Stopped = true; _buf.Clear(); }
+            if (text.Trim().Length > 0)
+            {
+                Stopped = true;
+                _buf.Clear();
+            }
             yield break;
         }
-        if (bufferText) _held.Add(text);
-        else yield return new TextDelta(text);
+        if (bufferText)
+            _held.Add(text);
+        else
+            yield return new TextDelta(text);
     }
 
     /// <summary>Call once the process output ends. Throws for failures the caller should see; otherwise returns the turn and any problem.</summary>
@@ -206,8 +368,10 @@ public sealed partial class StreamTranslator(IReadOnlyList<ToolSpec> tools, bool
         if (_error is not null || _limited)
         {
             var msg = _error ?? "Claude usage limit reached.";
-            if (_limited || LooksLikeLimit(msg)) throw new ProviderFailure(FailureKind.UsageLimit, msg, _retryAfter);
-            if (LooksLikeAuth(msg)) throw new ProviderFailure(FailureKind.Unavailable, msg);
+            if (_limited || LooksLikeLimit(msg))
+                throw new ProviderFailure(FailureKind.UsageLimit, msg, _retryAfter);
+            if (LooksLikeAuth(msg))
+                throw new ProviderFailure(FailureKind.Unavailable, msg);
             throw new ProviderFailure(FailureKind.Failed, msg);
         }
 
@@ -217,35 +381,58 @@ public sealed partial class StreamTranslator(IReadOnlyList<ToolSpec> tools, bool
             // An unterminated block (the closing tag never came) or a held-back "<tool" that never completed.
             var rest = _buf.ToString();
             _buf.Clear();
-            if (_inTool)
+            if (_inBare)
+            {
+                _inBare = false;
+                events.AddRange(BareBlock(rest));
+            }
+            else if (_inTool)
             {
                 _inTool = false;
                 events.AddRange(Block(rest));
             }
-            else events.AddRange(Emit(rest));
+            else
+                events.AddRange(Emit(rest));
         }
 
         var problem = Validate();
-        if (_calls.Count == 0) events.AddRange(_held.Select(h => (CompletionEvent)new TextDelta(h)));
-        if (_calls.Count == 0) events.AddRange(_unreadable.Select(h => (CompletionEvent)new TextDelta(h)));
+        if (_calls.Count == 0)
+            events.AddRange(_held.Select(h => (CompletionEvent)new TextDelta(h)));
+        if (_calls.Count == 0)
+            events.AddRange(_unreadable.Select(h => (CompletionEvent)new TextDelta(h)));
         events.AddRange(_calls.Select(c => new ToolCallEvent(c)));
         events.Add(new UsageEvent(_inputTokens, _outputTokens));
-        events.Add(new Finish(_calls.Count > 0 ? FinishReason.ToolCalls : _truncated ? FinishReason.Length : FinishReason.Stop));
+        events.Add(
+            new Finish(
+                _calls.Count > 0 ? FinishReason.ToolCalls
+                : _truncated ? FinishReason.Length
+                : FinishReason.Stop
+            )
+        );
         return new TranslatedTurn(events, problem, _raw.ToString(), _inputTokens, _outputTokens);
     }
 
     private string? Validate()
     {
-        if (!_parse) return null;
+        if (!_parse)
+            return null;
         foreach (var c in _calls)
-            if (ToolCallParser.Validate(c, tools) is { } why) return why;
-        if (_calls.Count == 0 && _unparsedBlock) return "the tool call block could not be read as JSON with a tool name and arguments";
+            if (ToolCallParser.Validate(c, tools) is { } why)
+                return why;
+        if (_calls.Count == 0 && _unparsedBlock)
+            return "the tool call block could not be read as JSON with a tool name and arguments";
         return null;
     }
 
     private static bool LooksLikeLimit(string m) =>
-        m.Contains("limit", StringComparison.OrdinalIgnoreCase) && (m.Contains("usage", StringComparison.OrdinalIgnoreCase) || m.Contains("reached", StringComparison.OrdinalIgnoreCase));
+        m.Contains("limit", StringComparison.OrdinalIgnoreCase)
+        && (
+            m.Contains("usage", StringComparison.OrdinalIgnoreCase)
+            || m.Contains("reached", StringComparison.OrdinalIgnoreCase)
+        );
 
     private static bool LooksLikeAuth(string m) =>
-        m.Contains("not logged in", StringComparison.OrdinalIgnoreCase) || m.Contains("/login", StringComparison.Ordinal) || m.Contains("authentication", StringComparison.OrdinalIgnoreCase);
+        m.Contains("not logged in", StringComparison.OrdinalIgnoreCase)
+        || m.Contains("/login", StringComparison.Ordinal)
+        || m.Contains("authentication", StringComparison.OrdinalIgnoreCase);
 }
