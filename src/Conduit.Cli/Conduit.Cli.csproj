@@ -13,5 +13,8 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Conduit.Capture\Conduit.Capture.csproj" />
+    <ProjectReference Include="..\Conduit.Server\Conduit.Server.csproj" />
+    <ProjectReference Include="..\Conduit.Provider.Claude\Conduit.Provider.Claude.csproj" />
+    <ProjectReference Include="..\Conduit.Provider.Fake\Conduit.Provider.Fake.csproj" />
   </ItemGroup>
 </Project>

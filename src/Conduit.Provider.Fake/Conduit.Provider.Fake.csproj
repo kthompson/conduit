@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- In-memory provider for tests and dry runs: no processes, scripted by the last user message. -->
+  <ItemGroup>
+    <ProjectReference Include="..\Conduit.Provider.Core\Conduit.Provider.Core.csproj" />
+  </ItemGroup>
+</Project>

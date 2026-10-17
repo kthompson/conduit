@@ -2,8 +2,14 @@
   <Folder Name="/src/">
     <Project Path="src/Conduit.Capture/Conduit.Capture.csproj" />
     <Project Path="src/Conduit.Cli/Conduit.Cli.csproj" />
+    <Project Path="src/Conduit.OpenAi/Conduit.OpenAi.csproj" />
+    <Project Path="src/Conduit.Provider.Claude/Conduit.Provider.Claude.csproj" />
+    <Project Path="src/Conduit.Provider.Core/Conduit.Provider.Core.csproj" />
+    <Project Path="src/Conduit.Provider.Fake/Conduit.Provider.Fake.csproj" />
+    <Project Path="src/Conduit.Server/Conduit.Server.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Conduit.Capture.Tests/Conduit.Capture.Tests.csproj" />
+    <Project Path="tests/Conduit.Server.Tests/Conduit.Server.Tests.csproj" />
   </Folder>
 </Solution>

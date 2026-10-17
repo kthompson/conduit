@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Host: config, instance registry, auth, and the OpenAI-compatible routes. Drivers are passed in by the executable. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Hocon" Version="2.0.4" />
+    <ProjectReference Include="..\Conduit.Provider.Core\Conduit.Provider.Core.csproj" />
+    <ProjectReference Include="..\Conduit.OpenAi\Conduit.OpenAi.csproj" />
+  </ItemGroup>
+</Project>

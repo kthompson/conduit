@@ -1,0 +1,3 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Provider abstractions only: no ASP.NET, no HTTP, no config parser. Drivers and the server both depend on this. -->
+</Project>

@@ -5,6 +5,14 @@ var app = new CommandApp();
 app.Configure(config =>
 {
     config.SetApplicationName("conduit");
+    config.AddCommand<ServeCommand>("serve")
+        .WithDescription("Run the OpenAI-compatible server over the configured provider instances.")
+        .WithExample("serve")
+        .WithExample("serve", "--config", "./conduit.conf", "--listen", "127.0.0.1:8787");
+    config.AddCommand<ConfigCommand>("config")
+        .WithDescription("Locate, validate or print the merged config (secrets redacted).")
+        .WithExample("config", "validate")
+        .WithExample("config", "show");
     config.AddCommand<CaptureCommand>("capture")
         .WithDescription("Run the capture server (a logging OpenAI-compatible endpoint), or summarize what it recorded.")
         .WithExample("capture")

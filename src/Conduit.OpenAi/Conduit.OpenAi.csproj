@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- OpenAI wire formats <-> the internal item stream. No ASP.NET: it parses and renders strings and JSON nodes. -->
+  <ItemGroup>
+    <ProjectReference Include="..\Conduit.Provider.Core\Conduit.Provider.Core.csproj" />
+  </ItemGroup>
+</Project>

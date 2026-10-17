@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Claude driver, model mode: the claude CLI as an inference engine (no built-in tools, no MCP, no user settings). -->
+  <ItemGroup>
+    <ProjectReference Include="..\Conduit.Provider.Core\Conduit.Provider.Core.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,6 +1,6 @@
 # conduit: OpenAI-compatible proxy over local coding-agent providers
 
-Status: **plan. Built so far: the capture server (section 8a, `conduit capture`, see docs/capture.md). Two captures against the Copilot app are in (section 11; the second covers timeouts, retries, errors and rendering): Chat Completions streaming, app-side tool execution, cwd and session id in the system prompt; leaning model mode as the Copilot default. Everything else is still plan.** Reference implementation: `/home/kevin/code/personal/t3code`.
+Status: **phases 0 (spikes a, c, d) and 1 (minimal) and 2 (Claude model mode) are built and work end to end with the Copilot app: `conduit serve` over a Claude instance, tool calls run by Copilot (section 10a). Not built yet: Responses API, Codex, ACP, setup wizard, `doctor`, `connect copilot`, session table, agent mode, hot reload.** Reference implementation: `/home/kevin/code/personal/t3code`.
 
 ## 1. Goal
 
@@ -518,6 +518,43 @@ build, because it turns the unknowns about the Copilot app into recorded facts.
 - **Copilot BYOK is a preview** and its requirements (tool calling, 128k context) may change. A runtime
   that cannot advertise those capabilities may be rejected by the app regardless of what we do.
 - Strict clients may choke on non-standard fields. Keep extensions namespaced and opt-in.
+
+## 10a. Build log: what exists and what it taught us (2026-10-17)
+
+Projects (all in `Conduit.slnx`): `Provider.Core` (driver/instance/snapshot/event-stream contracts, `ProviderFailure`), `OpenAi` (Chat Completions request parser,
+SSE/JSON writer, error mapping), `Server` (HOCON config + `instances.d`, registry with unavailable shadows, auth, routes, `ChatEndpoint`),
+`Provider.Fake` (scripted in-memory provider), `Provider.Claude` (model-mode driver), `Cli` (`serve`, `config path|validate|show`, `capture`).
+Tests: `Conduit.Server.Tests` (46: routes, SSE shape, errors, auth, shadows, disconnect, config, plus Claude replay of recorded `stream-json`
+in `Fixtures/`). Routes: `/healthz`, `/v1/models`, `/v1/models/{id}`, `/v1/chat/completions`, `/v1/providers`, `POST /v1/providers/{id}/refresh`.
+
+Spike results (phase 0):
+- **0d HOCON:** the `Hocon` 2.0.4 package parses on .NET 10: `${?ENV}` substitution, lists, nested objects. Quirks: arrays must be homogeneous
+  (mixed types throw), the API is `HoconParser.Parse` returning `HoconRoot`, `include` goes through a callback (we instead concatenate
+  `instances.d/*.conf` with the main file and parse once, so objects merge).
+- **0c Claude as an inference engine:** `claude -p --tools "" --strict-mcp-config --mcp-config '{"mcpServers":{}}' --no-session-persistence
+  --setting-sources "" --disable-slash-commands --output-format stream-json --verbose --include-partial-messages --system-prompt-file F --model M`
+  starts in about 3 to 6 s with no tools, MCP servers or hooks, streams `text_delta` and `thinking_delta`, and reports usage and rate limits.
+  Without `--strict-mcp-config` the account's claude.ai connectors leak in as tools. The caller's tools are carried as a **prompt protocol**
+  (`<tool_call>{"name":..,"arguments":{..}}</tool_call>`; history replays calls and results as text), not an MCP bridge: simpler, stateless,
+  and works. The CLI does not need a login of its own beyond `claude auth login`.
+- **Model reliability differs.** Sonnet follows the protocol cleanly (a real Copilot chat listed a directory through Copilot's own `bash`
+  and answered from the real result). Haiku wrote `arguments: {}` once and a malformed `<call>` tag once, and kept writing a made-up answer
+  after its tool call. Mitigation built: text after the first tool call is dropped and the process is killed (`StreamTranslator.Stopped`).
+  Not built: lenient parsing of malformed tags, or a repair retry. Use sonnet or opus for Copilot until then.
+
+Behavior decisions in `ChatEndpoint` (from the capture findings):
+- A provider failure **before the first event is a plain HTTP error** (429 with `Retry-After`, 503, 502), because the app retries those cleanly
+  and shows our message. After output has started the error can only go inside the stream, which the app retries too and duplicates the
+  partial text, so the stream path avoids starting output until the provider has produced something (or 10 s pass, then headers and a
+  keep-alive go out; keep-alives every 15 s).
+- Client disconnect cancels the provider and kills only the process we spawned.
+- No API keys configured is allowed on loopback only (the Copilot app sent no `Authorization` header with a blank key); a non-loopback bind
+  without a key refuses to start.
+
+Known gaps and next steps, in order: (1) lenient/repairing tool-call parsing and a model-quality note in docs; (2) `conduit connect copilot` and
+`doctor` (phase 3), including the app's per-model config shape (BYOK schema section) and `maxContextWindowTokens`; (3) Codex driver (phase 4);
+(4) prompt-size cost: Copilot sends about 40 KB of system prompt plus 48 tools per turn, so a Claude turn costs about 43k input tokens, and
+prompt caching across the one-process-per-request design is unverified; (5) session table and agent mode (phase 8).
 
 ## 11. Decisions and open questions
 

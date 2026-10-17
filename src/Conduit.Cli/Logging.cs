@@ -12,7 +12,7 @@ internal static class Logging
     /// Serilog is the application logger: console for the operator, a rolling file next to the captures for later.
     /// The capture library only sees <c>Microsoft.Extensions.Logging</c>; <c>AddSerilog</c> routes it here.
     /// </summary>
-    public static void Configure(string logDirectory, bool verbose)
+    public static void Configure(string logDirectory, bool verbose, string filePrefix = "capture")
     {
         Directory.CreateDirectory(logDirectory);
         Log.Logger = new LoggerConfiguration()
@@ -20,7 +20,7 @@ internal static class Logging
             .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
             .Enrich.FromLogContext()
             .WriteTo.Console(outputTemplate: ConsoleTemplate)
-            .WriteTo.File(Path.Combine(logDirectory, "capture-.log"),
+            .WriteTo.File(Path.Combine(logDirectory, filePrefix + "-.log"),
                 rollingInterval: RollingInterval.Day, retainedFileCountLimit: 14, outputTemplate: FileTemplate)
             .CreateLogger();
     }
