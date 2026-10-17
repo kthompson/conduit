@@ -1,6 +1,6 @@
 # conduit: OpenAI-compatible proxy over local coding-agent providers
 
-Status: **plan. Built so far: the capture server (section 8a, `conduit capture`, see docs/capture.md). First capture against the Copilot app is in (section 11): Chat Completions streaming, app-side tool execution, cwd and session id in the system prompt; leaning model mode as the Copilot default. Everything else is still plan.** Reference implementation: `/home/kevin/code/personal/t3code`.
+Status: **plan. Built so far: the capture server (section 8a, `conduit capture`, see docs/capture.md). Two captures against the Copilot app are in (section 11; the second covers timeouts, retries, errors and rendering): Chat Completions streaming, app-side tool execution, cwd and session id in the system prompt; leaning model mode as the Copilot default. Everything else is still plan.** Reference implementation: `/home/kevin/code/personal/t3code`.
 
 ## 1. Goal
 
@@ -572,10 +572,48 @@ Recorded facts about the Copilot desktop app's custom endpoint (BYOK "Custom end
 - **Agent vs. model mode:** the app is a full agent harness (its own tools, shell, cwd, sessions), which supports
   the lean toward model mode as the Copilot default. See decision 1 below.
 
-Still untested (need the matching scenario, and for some a look at the app): `slow` / `slow-nokeepalive` (idle
-timeout, whether keep-alives help), the three `error-*` scenarios (rendering, retries), how `progress` markdown and
-the `reasoning` shapes render, behavior when an API key is set and when `--key` is wrong, non-streaming use,
-whether the app sends more than one conversation's worth of requests at once (title/summary calls were not seen).
+Second capture run (2026-10-17, macOS, 23 completion requests, one chat per scenario, models added through the app's
+"Sync from endpoint" list; app v1.1.30). Answers most of the old "still untested" list:
+- **Timeouts:** `slow` and `slow-nokeepalive` (6 chunks 30 s apart, 180 s total) both completed, so the app tolerates
+  at least 3 minutes of silence between chunks and keep-alive comments are not needed up to that. Longer gaps are
+  still untested (the OpenAI SDK timeout is 600 s).
+- **Retries are done by the app, not the SDK:** every request has `x-stainless-retry-count: 0`, but the app resends
+  the identical body itself with `x-initiator: agent`. HTTP 500 gave 6 requests with growing gaps (0.5, 1.1, 2.0, 3.8,
+  9.5 s), then showed "Failed to get response ... retried 5 times (total retry wait time: 16.67 seconds). Last error:
+  500 <our message>". HTTP 429 gave 6 requests about 5.4 to 5.9 s apart (probably our `Retry-After`; check). So a
+  proxy error costs about 17 s of retries before the user sees it, and the error text we send is shown verbatim.
+- **Mid-stream failure is the dangerous case:** the stream was cut after partial text, the app retried (6 requests),
+  and the partial answer was concatenated three times in the chat. A failed stream therefore must be avoided or
+  reported as a clean HTTP error before any text is sent; retry-safe means idempotent and no partial output.
+- **Rendering:** `progress` renders well: bullet list of activity lines, fenced code block, quote and links display
+  as markdown. `reasoning` shows a collapsed "Thought for 1s" panel, so reasoning deltas are usable (the Chat
+  Completions shape the app took was the first one, `reasoning_content`; confirm which of the three labels by
+  expanding the panel per shape if it matters). Both are cheap evidence that agent-mode activity text is displayable.
+- **Cwd and session id on macOS:** chat sessions put `/Users/kevin/.copilot/chats/<date>/<slug>-<id8>` and
+  `Session folder: .../session-state/<uuid>` in the system prompt, as on Linux. Every request also lists
+  `/Users/kevin/code/personal/conduit` (a project list, not the cwd), confirming that only the `Current working
+  directory:` line may be parsed. System prompt 40.5 KB, always 48 tools, `tool_choice` never set.
+- **Session history:** all captured requests had 3 messages (each chat was one turn); multi-turn resend was seen in
+  the first run. Retries and tool continuations carry `x-initiator: agent`; fresh user turns carry `user`.
+- **Model add flow:** the app's model list is built from `/v1/models` ids; the per-model context window and
+  capabilities come from the app's own config (see the BYOK schema section), not from the response.
+
+Still untested: behavior with an API key set and a wrong `--key`, non-streaming use, title/summary side calls (none
+seen in 23 requests), gaps longer than 3 minutes, and whether a `Retry-After` on 429 is honored.
+
+### Copilot app BYOK schema (read 2026-10-17 from the app bundle, `GitHub Copilot.app/Contents/Resources/copilot-sdk/types.d.ts`)
+
+Answers the "what shape does the app want" question above. The app does **not** read context size or capabilities
+from `/v1/models`; BYOK models are declared in the Copilot config (SDK types marked `@experimental`):
+- `NamedProviderConfig`: `name` (no `/`), `type` (`openai` | `azure` | `anthropic`, default `openai`), `wireApi`
+  (`completions` default | `responses`, openai/azure only), `baseUrl`, `apiKey`, `bearerToken`, `headers`.
+- `ProviderModelConfig`: `id`, `provider`, `wireModel` (name sent on the wire), `modelId` (well-known base model
+  for capability lookup), `name`, `maxPromptTokens`, `maxContextWindowTokens`, `maxOutputTokens`, and
+  `capabilities` (`supports.vision`, `supports.reasoningEffort`, `limits.*`). Selection id is `provider/id`.
+- Consequence: `conduit connect copilot` must print these model entries (with `maxContextWindowTokens >= 128000`,
+  `reasoningEffort` per model) rather than rely on `/v1/models` fields; `/v1/models` only needs ids.
+- `wireApi` defaults to `completions`, matching the capture. Custom `headers` can carry `X-Workspace` or a session
+  hint if the app's UI exposes it (unverified).
 
 Decided from the capture (decision 1 confirmed by the user 2026-10-17; 2 and 3 follow directly from the data):
 1. **Model mode is the default for Copilot** (was "undecided"). Copilot brings 48+ tools and executes tool calls
