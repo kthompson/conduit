@@ -1,20 +1,29 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using Conduit.Provider.Core;
 
 namespace Conduit.Provider.Claude;
 
+/// <summary>What one run produced: the events to send, why they are not trustworthy (if they are not), and the raw reply for a retry.</summary>
+public sealed record TranslatedTurn(IReadOnlyList<CompletionEvent> Events, string? Problem, string RawReply, int PromptTokens, int CompletionTokens);
+
 /// <summary>
 /// Reads <c>claude --output-format stream-json --include-partial-messages</c> lines and produces the internal item stream.
-/// Text is streamed live, except that <c>&lt;tool_call&gt;</c> blocks are held back, parsed, and emitted as tool calls.
+/// Text is streamed live, except that tool-call blocks are held back, parsed (see <see cref="ToolCallParser"/>), and returned as
+/// tool calls at the end. <see cref="Complete"/> reports a <c>Problem</c> when the calls cannot be run as written, so the driver
+/// can ask the model once more before anything is sent.
 /// </summary>
-public sealed class StreamTranslator(bool parseToolCalls)
+public sealed partial class StreamTranslator(IReadOnlyList<ToolSpec> tools, bool bufferText = false)
 {
+    private readonly bool _parse = tools.Count > 0;
     private readonly StringBuilder _buf = new();
-    private readonly StringBuilder _tool = new();
+    private readonly StringBuilder _raw = new();
     private readonly List<ToolCall> _calls = [];
+    private readonly List<string> _held = [];
     private bool _inTool;
+    private bool _unparsedBlock;
     private int _inputTokens, _outputTokens;
     private bool _truncated;
     private string? _error;
@@ -27,6 +36,7 @@ public sealed class StreamTranslator(bool parseToolCalls)
     /// </summary>
     public bool Stopped { get; private set; }
 
+    /// <summary>Feed one stdout line. Returns the text and reasoning to send right now.</summary>
     public IEnumerable<CompletionEvent> Feed(string line)
     {
         if (Stopped) yield break;
@@ -69,7 +79,7 @@ public sealed class StreamTranslator(bool parseToolCalls)
                         foreach (var e in Text(delta["text"]?.GetValue<string>() ?? "")) yield return e;
                         break;
                     case "thinking_delta":
-                        if (delta["thinking"]?.GetValue<string>() is { Length: > 0 } th) yield return new ReasoningDelta(th);
+                        if (!bufferText && delta["thinking"]?.GetValue<string>() is { Length: > 0 } th) yield return new ReasoningDelta(th);
                         break;
                 }
                 break;
@@ -94,82 +104,101 @@ public sealed class StreamTranslator(bool parseToolCalls)
 
     private IEnumerable<CompletionEvent> Text(string chunk)
     {
-        if (!parseToolCalls)
+        _raw.Append(chunk);
+        if (!_parse)
         {
-            if (chunk.Length > 0) yield return new TextDelta(chunk);
+            foreach (var e in Emit(chunk)) yield return e;
             yield break;
         }
 
         _buf.Append(chunk);
-        while (true)
+        while (!Stopped)
         {
             var s = _buf.ToString();
             if (!_inTool)
             {
-                var i = s.IndexOf(PromptBuilder.ToolOpen, StringComparison.Ordinal);
-                if (i >= 0)
+                var open = OpenTag(s);
+                if (open is not null)
                 {
-                    foreach (var e in Emit(s[..i])) yield return e;
-                    if (Stopped) yield break;
-                    _buf.Clear().Append(s[(i + PromptBuilder.ToolOpen.Length)..]);
+                    foreach (var e in Emit(s[..open.Index])) yield return e;
+                    _buf.Clear().Append(s[open.Index..]);
                     _inTool = true;
                     continue;
                 }
-                // Hold back a tail that could be the start of an opening tag split across chunks.
-                var keep = PartialSuffix(s, PromptBuilder.ToolOpen);
+                // Hold back a tail that could be the start of a tag split across chunks.
+                var keep = PartialTagLength(s);
                 if (s.Length > keep) foreach (var e in Emit(s[..^keep])) yield return e;
-                if (Stopped) yield break;
-                _buf.Clear().Append(s[^keep..]);
+                if (!Stopped) _buf.Clear().Append(s[^keep..]);
                 yield break;
             }
 
-            var close = s.IndexOf(PromptBuilder.ToolClose, StringComparison.Ordinal);
-            if (close < 0) yield break;
-            var body = s[..close];
-            _buf.Clear().Append(s[(close + PromptBuilder.ToolClose.Length)..]);
+            var end = BlockEnd(s);
+            if (end < 0) yield break;
+            _buf.Clear().Append(s[end..]);
             _inTool = false;
-            if (TryParseCall(body) is { } call)
-            {
-                _calls.Add(call);
-                yield return new ToolCallEvent(call);
-            }
-            else
-            {
-                // Not valid JSON: show it rather than lose it (or, after a good call, treat it as the model running on).
-                foreach (var e in Emit(PromptBuilder.ToolOpen + body + PromptBuilder.ToolClose)) yield return e;
-                if (Stopped) yield break;
-            }
+            foreach (var e in Block(s[..end])) yield return e;
         }
     }
 
+    private static Match? OpenTag(string s)
+    {
+        foreach (Match m in ToolCallParser.Tag.Matches(s))
+            if (m.Groups[1].Length == 0 && !m.Value.EndsWith("/>")) return m;
+        return null;
+    }
+
+    /// <summary>The index just past the close tag that balances the block's first open tag, or -1 while it is still open.</summary>
+    private static int BlockEnd(string s)
+    {
+        var depth = 0;
+        foreach (Match m in ToolCallParser.Tag.Matches(s))
+        {
+            if (m.Value.EndsWith("/>")) continue;
+            depth += m.Groups[1].Length == 0 ? 1 : -1;
+            if (depth <= 0) return m.Index + m.Length;
+        }
+        return -1;
+    }
+
+    private static int PartialTagLength(string s)
+    {
+        var i = s.LastIndexOf('<');
+        if (i < 0) return 0;
+        var tail = s[i..];
+        return tail.Length <= 64 && !tail.Contains('>') && PartialTag().IsMatch(tail) ? tail.Length : 0;
+    }
+
+    [GeneratedRegex(@"^</?[A-Za-z_]*(\s[^>]*)?$")]
+    private static partial Regex PartialTag();
+
+    private IEnumerable<CompletionEvent> Block(string block)
+    {
+        var found = ToolCallParser.Parse(block, tools);
+        if (found.Count > 0)
+        {
+            _calls.AddRange(found);
+            yield break;
+        }
+        // A tag with nothing runnable inside: show it (once, before any good call) rather than lose it, and remember it was a failed attempt.
+        _unparsedBlock = true;
+        foreach (var e in Emit(block)) yield return e;
+    }
+
+    /// <summary>Text goes out live, is held for a retry attempt, or (after a tool call) is dropped and ends the turn.</summary>
     private IEnumerable<CompletionEvent> Emit(string text)
     {
-        if (_calls.Count == 0) { if (text.Length > 0) yield return new TextDelta(text); yield break; }
-        if (text.Trim().Length > 0) { Stopped = true; _buf.Clear(); }
-    }
-
-    private static int PartialSuffix(string s, string tag)
-    {
-        for (var n = Math.Min(tag.Length - 1, s.Length); n > 0; n--)
-            if (s.EndsWith(tag[..n], StringComparison.Ordinal)) return n;
-        return 0;
-    }
-
-    private static ToolCall? TryParseCall(string body)
-    {
-        try
+        if (text.Length == 0) yield break;
+        if (_calls.Count > 0)
         {
-            if (JsonNode.Parse(body.Trim()) is not JsonObject o || o["name"]?.GetValue<string>() is not { Length: > 0 } name) return null;
-            var args = o["arguments"] ?? new JsonObject();
-            // Some models double-encode arguments as a JSON string.
-            if (args is JsonValue v && v.TryGetValue<string>(out var s) && JsonNode.Parse(s) is JsonObject inner) args = inner;
-            return new ToolCall("call_" + Guid.NewGuid().ToString("N")[..24], name, args.ToJsonString());
+            if (text.Trim().Length > 0) { Stopped = true; _buf.Clear(); }
+            yield break;
         }
-        catch (Exception e) when (e is JsonException or InvalidOperationException) { return null; }
+        if (bufferText) _held.Add(text);
+        else yield return new TextDelta(text);
     }
 
-    /// <summary>Call once the process output ends. Flushes held-back text, then usage and the finish reason, or throws.</summary>
-    public IEnumerable<CompletionEvent> Complete()
+    /// <summary>Call once the process output ends. Throws for failures the caller should see; otherwise returns the turn and any problem.</summary>
+    public TranslatedTurn Complete()
     {
         if (_error is not null || _limited)
         {
@@ -179,16 +208,35 @@ public sealed class StreamTranslator(bool parseToolCalls)
             throw new ProviderFailure(FailureKind.Failed, msg);
         }
 
-        if (_buf.Length > 0)
+        var events = new List<CompletionEvent>();
+        if (_buf.Length > 0 && !Stopped)
         {
-            // An unterminated tool block, or a held-back "<tool" that never completed: it was only text after all.
-            var rest = (_inTool ? PromptBuilder.ToolOpen : "") + _buf;
+            // An unterminated block (the closing tag never came) or a held-back "<tool" that never completed.
+            var rest = _buf.ToString();
             _buf.Clear();
-            foreach (var e in Emit(rest)) yield return e;
+            if (_inTool)
+            {
+                _inTool = false;
+                events.AddRange(Block(rest));
+            }
+            else events.AddRange(Emit(rest));
         }
 
-        yield return new UsageEvent(_inputTokens, _outputTokens);
-        yield return new Finish(_calls.Count > 0 ? FinishReason.ToolCalls : _truncated ? FinishReason.Length : FinishReason.Stop);
+        var problem = Validate();
+        if (_calls.Count == 0) events.AddRange(_held.Select(h => (CompletionEvent)new TextDelta(h)));
+        events.AddRange(_calls.Select(c => new ToolCallEvent(c)));
+        events.Add(new UsageEvent(_inputTokens, _outputTokens));
+        events.Add(new Finish(_calls.Count > 0 ? FinishReason.ToolCalls : _truncated ? FinishReason.Length : FinishReason.Stop));
+        return new TranslatedTurn(events, problem, _raw.ToString(), _inputTokens, _outputTokens);
+    }
+
+    private string? Validate()
+    {
+        if (!_parse) return null;
+        foreach (var c in _calls)
+            if (ToolCallParser.Validate(c, tools) is { } why) return why;
+        if (_calls.Count == 0 && _unparsedBlock) return "the tool call block could not be read as JSON with a tool name and arguments";
+        return null;
     }
 
     private static bool LooksLikeLimit(string m) =>

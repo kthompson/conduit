@@ -25,6 +25,9 @@ public sealed class ClaudeDriver(IClaudeProcess? process = null) : IProviderDriv
 internal sealed class ClaudeInstance : IProviderInstance
 {
     private static readonly (string Slug, string Name)[] DefaultModels = [("sonnet", "Claude Sonnet"), ("opus", "Claude Opus"), ("haiku", "Claude Haiku")];
+    /// <summary>Extra attempts after an unusable tool call. One is enough to fix a missed argument; more would only add latency.</summary>
+    private const int MaxRepairs = 1;
+
     private static readonly HashSet<string> Efforts = ["low", "medium", "high", "xhigh", "max"];
 
     private readonly ProviderInstanceConfig _config;
@@ -102,17 +105,32 @@ internal sealed class ClaudeInstance : IProviderInstance
         var env = new Dictionary<string, string>(_config.Environment);
         if (request.MaxTokens is { } max) env["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] = max.ToString();
 
-        var translator = new StreamTranslator(parseToolCalls: request.Tools.Count > 0 && request.ToolChoice != "none");
+        var tools = request.ToolChoice == "none" ? [] : request.Tools;
+        TranslatedTurn? turn = null;
+        int promptTokens = 0, completionTokens = 0;
         try
         {
-            await foreach (var line in _process.RunAsync(new ClaudeInvocation(_binary, args, scratch, env, built.Prompt), ct))
+            // Attempt 0 streams text live. If its tool calls cannot be run as written, one more attempt shows the model its mistake;
+            // that attempt buffers its text so nothing the client already saw is repeated.
+            for (var attempt = 0; attempt <= MaxRepairs; attempt++)
             {
-                foreach (var ev in translator.Feed(line))
-                    yield return ev;
-                // The model ran on past its tool call. Leaving the loop disposes the process stream, which kills the process.
-                if (translator.Stopped) break;
+                var translator = new StreamTranslator(tools, bufferText: attempt > 0);
+                var prompt = attempt == 0 ? built.Prompt : PromptBuilder.Repair(built, turn!.RawReply, turn.Problem!);
+                await foreach (var line in _process.RunAsync(new ClaudeInvocation(_binary, args, scratch, env, prompt), ct))
+                {
+                    foreach (var ev in translator.Feed(line))
+                        yield return ev;
+                    // The model ran on past its tool call. Leaving the loop disposes the process stream, which kills the process.
+                    if (translator.Stopped) break;
+                }
+                turn = translator.Complete();
+                promptTokens += turn.PromptTokens;
+                completionTokens += turn.CompletionTokens;
+                if (turn.Problem is null) break;
             }
-            foreach (var ev in translator.Complete()) yield return ev;
+
+            foreach (var ev in turn!.Events)
+                yield return ev is UsageEvent ? new UsageEvent(promptTokens, completionTokens) : ev;
         }
         finally
         {

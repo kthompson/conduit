@@ -11,12 +11,14 @@ public class ClaudeTests
 {
     private static string[] Fixture(string name) => File.ReadAllLines(Path.Combine(AppContext.BaseDirectory, "Fixtures", name));
 
+    private static List<ToolSpec> Specs(params string[] names) => names.Select(n => new ToolSpec(n, null, null)).ToList();
+
     private static List<CompletionEvent> Translate(IEnumerable<string> lines, bool tools)
     {
-        var t = new StreamTranslator(tools);
+        var t = new StreamTranslator(tools ? Specs("bash", "view", "a", "b", "x") : []);
         var events = new List<CompletionEvent>();
         foreach (var l in lines) events.AddRange(t.Feed(l));
-        events.AddRange(t.Complete());
+        events.AddRange(t.Complete().Events);
         return events;
     }
 
@@ -78,11 +80,11 @@ public class ClaudeTests
     [Fact]
     public void Text_after_a_tool_call_is_dropped_and_marks_the_stream_stopped()
     {
-        var t = new StreamTranslator(true);
+        var t = new StreamTranslator(Specs("bash"));
         var events = new List<CompletionEvent>();
         foreach (var l in new[] { StreamLine("Checking.\n<tool_call>{\"name\":\"bash\",\"arguments\":{\"command\":\"ls\"}}</tool_call>"), StreamLine("\n\n"), StreamLine("The directory is empty.") })
             events.AddRange(t.Feed(l));
-        events.AddRange(t.Complete());
+        events.AddRange(t.Complete().Events);
 
         Assert.True(t.Stopped);
         Assert.Equal("Checking.\n", string.Concat(events.OfType<TextDelta>().Select(e => e.Text)));
@@ -137,18 +139,18 @@ public class ClaudeTests
     [InlineData("""{"type":"result","is_error":true,"result":"something odd"}""", FailureKind.Failed)]
     public void Error_results_map_to_failure_kinds(string line, FailureKind kind)
     {
-        var t = new StreamTranslator(false);
+        var t = new StreamTranslator([]);
         _ = t.Feed(line).ToList();
-        Assert.Equal(kind, Assert.Throws<ProviderFailure>(() => t.Complete().ToList()).Kind);
+        Assert.Equal(kind, Assert.Throws<ProviderFailure>(() => t.Complete()).Kind);
     }
 
     [Fact]
     public void Rejected_rate_limit_event_gives_retry_after()
     {
         var reset = DateTimeOffset.UtcNow.AddMinutes(10).ToUnixTimeSeconds();
-        var t = new StreamTranslator(false);
+        var t = new StreamTranslator([]);
         _ = t.Feed("""{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":RESET}}""".Replace("RESET", reset.ToString())).ToList();
-        var f = Assert.Throws<ProviderFailure>(() => t.Complete().ToList());
+        var f = Assert.Throws<ProviderFailure>(() => t.Complete());
         Assert.Equal(FailureKind.UsageLimit, f.Kind);
         Assert.InRange(f.RetryAfter!.Value.TotalSeconds, 500, 700);
     }

@@ -537,10 +537,15 @@ Spike results (phase 0):
   Without `--strict-mcp-config` the account's claude.ai connectors leak in as tools. The caller's tools are carried as a **prompt protocol**
   (`<tool_call>{"name":..,"arguments":{..}}</tool_call>`; history replays calls and results as text), not an MCP bridge: simpler, stateless,
   and works. The CLI does not need a login of its own beyond `claude auth login`.
-- **Model reliability differs.** Sonnet follows the protocol cleanly (a real Copilot chat listed a directory through Copilot's own `bash`
-  and answered from the real result). Haiku wrote `arguments: {}` once and a malformed `<call>` tag once, and kept writing a made-up answer
-  after its tool call. Mitigation built: text after the first tool call is dropped and the process is killed (`StreamTranslator.Stopped`).
-  Not built: lenient parsing of malformed tags, or a repair retry. Use sonnet or opus for Copilot until then.
+- **Model reliability differs, and was hardened.** On Copilot's real payload (48 tools, 40 KB system prompt) haiku first produced a usable call
+  in about 5 of 11 tries. Failure modes seen: flat arguments next to `name` with a stray `}`, other tag names (`<call>`, `<function_calls>`),
+  required arguments left out (`bash` needs `command` and `description`), and writing a made-up answer after the call. Fixes (all in
+  `Provider.Claude`): `ToolCallParser` reads those variants plus Claude's native `<invoke>`/`<parameter>` XML, string-encoded arguments and OpenAI-style
+  objects, and matches tool names ignoring case; calls are validated against each tool's `required` list; an unusable call triggers **one repair
+  retry** that shows the model its own reply and what was wrong (text from the retry is buffered so nothing is repeated, usage is summed);
+  text after the first call is dropped and the process killed; the prompt now ends with a harness reminder and demands every required
+  argument. Re-measured live: haiku 20 of 20 usable calls, sonnet fine; in the Copilot app haiku created and read back a file through Copilot'"'"'s own
+  `bash`. Not done: logging when a retry happens (the driver has no logger yet), and a per-instance switch for the retry count.
 
 Behavior decisions in `ChatEndpoint` (from the capture findings):
 - A provider failure **before the first event is a plain HTTP error** (429 with `Retry-After`, 503, 502), because the app retries those cleanly
@@ -551,7 +556,7 @@ Behavior decisions in `ChatEndpoint` (from the capture findings):
 - No API keys configured is allowed on loopback only (the Copilot app sent no `Authorization` header with a blank key); a non-loopback bind
   without a key refuses to start.
 
-Known gaps and next steps, in order: (1) lenient/repairing tool-call parsing and a model-quality note in docs; (2) `conduit connect copilot` and
+Known gaps and next steps, in order: (1) retry/repair logging and metrics; (2) `conduit connect copilot` and
 `doctor` (phase 3), including the app's per-model config shape (BYOK schema section) and `maxContextWindowTokens`; (3) Codex driver (phase 4);
 (4) prompt-size cost: Copilot sends about 40 KB of system prompt plus 48 tools per turn, so a Claude turn costs about 43k input tokens, and
 prompt caching across the one-process-per-request design is unverified; (5) session table and agent mode (phase 8).

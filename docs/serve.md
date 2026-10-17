@@ -26,7 +26,7 @@ Files in `instances.d/*.conf` beside it are merged in. `conduit config validate`
 
 Settings, Model providers, Add provider, Custom endpoint: base URL `http://127.0.0.1:8787/v1`, wire API `completions`, key blank
 (or the key you set). Use the sync icon to list `claude/sonnet`, `claude/opus`, `claude/haiku` and add the ones you want.
-Prefer sonnet or opus: haiku is unreliable at the tool-call protocol (see PLAN.md section 10a).
+Tool calls are parsed tolerantly and, if a call is unusable (unknown tool, missing required argument), the model is asked once more; haiku, sonnet and opus all work (see PLAN.md section 10a).
 
 ## Model ids
 
