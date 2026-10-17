@@ -556,7 +556,7 @@ Behavior decisions in `ChatEndpoint` (from the capture findings):
 - No API keys configured is allowed on loopback only (the Copilot app sent no `Authorization` header with a blank key); a non-loopback bind
   without a key refuses to start.
 
-the `conduit setup` wizard (the rest of phase 3); (3) Codex driver (phase 4);
+ `conduit setup` wizard (the rest of phase 3); (3) Codex driver (phase 4);
 (4) prompt-size cost: Copilot sends about 40 KB of system prompt plus 48 tools per turn, so a Claude turn costs about 43k input tokens, and
 prompt caching across the one-process-per-request design is unverified; (5) session table and agent mode (phase 8).
 
