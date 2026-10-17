@@ -1,6 +1,6 @@
 # conduit: OpenAI-compatible proxy over local coding-agent providers
 
-Status: **phases 0 (spikes a, c, d) and 1 (minimal) and 2 (Claude model mode) are built and work end to end with the Copilot app: `conduit serve` over a Claude instance, tool calls run by Copilot (section 10a). Not built yet: Responses API, Codex, ACP, setup wizard, `doctor`, `connect copilot`, session table, agent mode, hot reload.** Reference implementation: `/home/kevin/code/personal/t3code`.
+Status: **phases 0 (spikes a, c, d), 1 (minimal), 2 (Claude model mode) and most of 3 (`doctor`, `connect copilot`) are built and work end to end with the Copilot app: `conduit serve` over a Claude instance, tool calls run by Copilot (section 10a). Not built yet: Responses API, Codex, ACP, the `setup` wizard, session table, agent mode, hot reload.** Reference implementation: `/home/kevin/code/personal/t3code`.
 
 ## 1. Goal
 
@@ -556,8 +556,7 @@ Behavior decisions in `ChatEndpoint` (from the capture findings):
 - No API keys configured is allowed on loopback only (the Copilot app sent no `Authorization` header with a blank key); a non-loopback bind
   without a key refuses to start.
 
-Known gaps and next steps, in order: (1) retry/repair logging and metrics; (2) `conduit connect copilot` and
-`doctor` (phase 3), including the app's per-model config shape (BYOK schema section) and `maxContextWindowTokens`; (3) Codex driver (phase 4);
+the `conduit setup` wizard (the rest of phase 3); (3) Codex driver (phase 4);
 (4) prompt-size cost: Copilot sends about 40 KB of system prompt plus 48 tools per turn, so a Claude turn costs about 43k input tokens, and
 prompt caching across the one-process-per-request design is unverified; (5) session table and agent mode (phase 8).
 

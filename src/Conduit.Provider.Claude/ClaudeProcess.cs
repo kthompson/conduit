@@ -80,7 +80,8 @@ public sealed class SystemClaudeProcess : IClaudeProcess
         try { return Process.Start(psi) ?? throw new ProviderFailure(FailureKind.Unavailable, $"Could not start '{inv.Binary}'."); }
         catch (System.ComponentModel.Win32Exception e)
         {
-            throw new ProviderFailure(FailureKind.Unavailable, $"Could not start '{inv.Binary}': {e.Message}", inner: e);
+            throw new ProviderFailure(FailureKind.Unavailable,
+                $"Could not run '{inv.Binary}'. Is Claude Code installed and on PATH? Otherwise set config {{ binary-path = \"/full/path/to/claude\" }} on the instance.", inner: e);
         }
     }
 

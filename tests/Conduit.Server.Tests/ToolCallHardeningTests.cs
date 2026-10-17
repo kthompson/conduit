@@ -240,3 +240,18 @@ public class ToolCallHardeningTests
         Assert.Contains("That reply could not be used: no good.", repaired);
     }
 }
+
+public class ClaudeProcessTests
+{
+    [Fact]
+    public async Task A_missing_binary_is_unavailable_with_advice_that_does_not_mention_the_working_directory()
+    {
+        var dir = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "proc-" + Guid.NewGuid().ToString("N"))).FullName;
+        var inv = new ClaudeInvocation("/nonexistent/claude-" + Guid.NewGuid().ToString("N"), ["--version"], dir, new Dictionary<string, string>(), null);
+        var f = await Assert.ThrowsAsync<ProviderFailure>(() => new SystemClaudeProcess().RunToEndAsync(inv, default));
+        Assert.Equal(FailureKind.Unavailable, f.Kind);
+        Assert.Contains("on PATH", f.Message);
+        Assert.Contains("binary-path", f.Message);
+        Assert.DoesNotContain("working directory", f.Message);
+    }
+}

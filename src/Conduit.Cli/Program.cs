@@ -13,6 +13,14 @@ app.Configure(config =>
         .WithDescription("Locate, validate or print the merged config (secrets redacted).")
         .WithExample("config", "validate")
         .WithExample("config", "show");
+    config.AddCommand<DoctorCommand>("doctor")
+        .WithDescription("Diagnose the setup: config, exposure, port, each instance, and a sample completion.")
+        .WithExample("doctor")
+        .WithExample("doctor", "--skip-completion");
+    config.AddCommand<ConnectCommand>("connect")
+        .WithDescription("Print the values to enter in another app so it uses this server (copilot).")
+        .WithExample("connect", "copilot")
+        .WithExample("connect", "copilot", "--check");
     config.AddCommand<CaptureCommand>("capture")
         .WithDescription("Run the capture server (a logging OpenAI-compatible endpoint), or summarize what it recorded.")
         .WithExample("capture")

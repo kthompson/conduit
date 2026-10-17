@@ -38,3 +38,16 @@ Override the list with `config { models = [sonnet, opus] }`.
 The `claude` process runs with every built-in tool, MCP server, hook, skill and user setting off, in an empty scratch directory.
 The caller's `tools` are described to the model in the system prompt, and a `<tool_call>` block in its reply is returned as
 `tool_calls` for the caller to run. Nothing executes on this machine unless the caller runs it.
+
+## `conduit doctor`
+
+Checks the setup without starting the server: config, exposure (API keys, loopback), port, data directory, each instance (binary,
+version, signed in) and, unless `--skip-completion`, sends a one-word prompt to each ready instance and reports the time. Exit code 1
+if anything fails.
+
+## `conduit connect copilot`
+
+Prints what to type into the Copilot app's custom-endpoint form (display name, base URL, wire API, key, and the model ids to add).
+`--check` calls the running server with your configured key and confirms it serves those models; `--show-key` prints the first key;
+`--host` swaps in another address (for a LAN setup); `--json` is for scripts. It never writes the app's settings: the app keeps custom
+providers in its own database and keychain and documents no config file.
