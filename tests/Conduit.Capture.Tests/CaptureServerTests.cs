@@ -37,8 +37,8 @@ public class CaptureServerTests
         await using var s = await TestServer.StartAsync(o => o.ContextLength = 256_000);
         var json = JsonNode.Parse(await s.Http.GetStringAsync("/v1/models"))!;
         var ids = json["data"]!.AsArray().Select(m => (string)m!["id"]!).ToList();
-        Assert.True(ids.Contains("capture"));
-        Assert.True(ids.Contains("capture@slow"));
+        Assert.Contains("capture", ids);
+        Assert.Contains("capture@slow", ids);
         var first = json["data"]![0]!;
         Assert.Equal(256_000, (int)first["context_length"]!);
         Assert.True((bool)first["capabilities"]!["supports"]!["tool_calls"]!);
@@ -74,7 +74,7 @@ public class CaptureServerTests
         Assert.Equal("system prompt", (string)rec["derived"]!["paths"]![0]!["where"]!);
         Assert.Contains("abc123", rec["derived"]!["sessionIds"]!.ToJsonString());
         Assert.Contains("hi", (string)rec["body"]!);
-        Assert.False(File.ReadAllText(s.CaptureFile).Contains("sk-super-secret"));
+        Assert.DoesNotContain("sk-super-secret", File.ReadAllText(s.CaptureFile));
         Assert.Equal("completed", (string)rec["response"]!["endedBy"]!);
     }
 
@@ -214,7 +214,7 @@ public class CaptureServerTests
             ]!;
         Assert.Contains("tools offered: **1**", content);
         Assert.Contains(@"C:\Users\kev\proj\a.ts", content);
-        Assert.False(content.Contains("github.com/a/b"));
+        Assert.DoesNotContain("github.com/a/b", content);
         Assert.Equal("echo", (string)(await s.RecordsAsync(1))[0]["response"]!["scenario"]!);
     }
 
@@ -234,7 +234,7 @@ public class CaptureServerTests
             )
         ).Content.ReadAsStringAsync();
         Assert.Contains(": keep-alive", with);
-        Assert.False(without.Contains(": keep-alive"));
+        Assert.DoesNotContain(": keep-alive", without);
     }
 
     [Fact]
@@ -305,9 +305,9 @@ public class RequestAnalyzerTests
             """{"messages":[{"role":"user","content":"open ~/code/app/src/a.ts, see https://example.com/a/b and/or 10/17/2026 and file:///home/k/x.txt in D:\\work\\r"}]}"""
         );
         var paths = f.Json["paths"]!.AsArray().Select(p => (string)p!["path"]!).ToList();
-        Assert.True(paths.Contains("~/code/app/src/a.ts"));
-        Assert.True(paths.Contains("file:///home/k/x.txt"));
-        Assert.True(paths.Contains(@"D:\work\r"));
+        Assert.Contains("~/code/app/src/a.ts", paths);
+        Assert.Contains("file:///home/k/x.txt", paths);
+        Assert.Contains(@"D:\work\r", paths);
         Assert.Equal(3, paths.Count);
     }
 
