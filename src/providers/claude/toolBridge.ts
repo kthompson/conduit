@@ -36,7 +36,10 @@ export class ToolBridge {
       this.toClaude.set(tool.function.name, alias);
     }
 
-    this.server = new McpServer({ name: BRIDGE_SERVER, version: "1.0.0" }, { capabilities: { tools: {} } });
+    this.server = new McpServer(
+      { name: BRIDGE_SERVER, version: "1.0.0" },
+      { capabilities: { tools: {} } },
+    );
     this.server.server.setRequestHandler(ListToolsRequestSchema, async () => ({
       tools: tools.map((t) => ({
         name: this.toClaude.get(t.function.name)!,
@@ -109,7 +112,10 @@ function aliasFor(name: string): string {
   return `${safe.slice(0, MAX_TOOL_NAME - PREFIX.length - 9)}_${digest}`;
 }
 
-function normalizeSchema(parameters: Record<string, unknown> | undefined): { type: "object"; [k: string]: unknown } {
+function normalizeSchema(parameters: Record<string, unknown> | undefined): {
+  type: "object";
+  [k: string]: unknown;
+} {
   if (parameters && parameters.type === "object") return parameters as { type: "object" };
   return { type: "object", properties: {}, ...(parameters ?? {}) } as { type: "object" };
 }

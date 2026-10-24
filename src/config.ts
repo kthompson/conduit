@@ -157,18 +157,25 @@ function applyToml(config: Config, raw: Record<string, unknown>, file: string): 
       }
       c.settingSources = sources as ClaudeConfig["settingSources"];
     }
-    c.stripApiKey = bool(claude.strip_api_key, where("providers.claude.strip_api_key")) ?? c.stripApiKey;
+    c.stripApiKey =
+      bool(claude.strip_api_key, where("providers.claude.strip_api_key")) ?? c.stripApiKey;
     c.sessionIdleSeconds =
-      num(claude.session_idle_seconds, where("providers.claude.session_idle_seconds")) ?? c.sessionIdleSeconds;
-    c.maxSessions = num(claude.max_sessions, where("providers.claude.max_sessions")) ?? c.maxSessions;
+      num(claude.session_idle_seconds, where("providers.claude.session_idle_seconds")) ??
+      c.sessionIdleSeconds;
+    c.maxSessions =
+      num(claude.max_sessions, where("providers.claude.max_sessions")) ?? c.maxSessions;
     c.toolTimeoutSeconds =
-      num(claude.tool_timeout_seconds, where("providers.claude.tool_timeout_seconds")) ?? c.toolTimeoutSeconds;
+      num(claude.tool_timeout_seconds, where("providers.claude.tool_timeout_seconds")) ??
+      c.toolTimeoutSeconds;
     c.effort = nonEmpty(str(claude.effort, where("providers.claude.effort")));
-    c.contextWindow = num(claude.context_window, where("providers.claude.context_window")) ?? c.contextWindow;
+    c.contextWindow =
+      num(claude.context_window, where("providers.claude.context_window")) ?? c.contextWindow;
     const reasoning = str(claude.reasoning, where("providers.claude.reasoning"));
     if (reasoning !== undefined) {
       if (reasoning !== "reasoning_content" && reasoning !== "think_tags" && reasoning !== "none") {
-        throw new Error(`${where("providers.claude.reasoning")}: expected reasoning_content, think_tags or none`);
+        throw new Error(
+          `${where("providers.claude.reasoning")}: expected reasoning_content, think_tags or none`,
+        );
       }
       c.reasoning = reasoning;
     }
@@ -216,7 +223,8 @@ function str(value: unknown, where: string): string | undefined {
 
 function num(value: unknown, where: string): number | undefined {
   if (value === undefined) return undefined;
-  if (typeof value !== "number" || !Number.isFinite(value)) throw new Error(`${where}: expected a number`);
+  if (typeof value !== "number" || !Number.isFinite(value))
+    throw new Error(`${where}: expected a number`);
   return value;
 }
 

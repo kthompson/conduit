@@ -32,7 +32,9 @@ export class MockProvider implements Provider {
         const [, name, args] = match;
         const known = request.tools?.some((t) => t.function.name === name) ?? false;
         if (!known) {
-          yield* this.text(`Mock: no tool named \`${name}\` in this request. Tools: ${toolNames(request)}`);
+          yield* this.text(
+            `Mock: no tool named \`${name}\` in this request. Tools: ${toolNames(request)}`,
+          );
           return yield { type: "done", finishReason: "stop", usage: undefined };
         }
         yield* this.text(`Calling \`${name}\`.`);

@@ -9,7 +9,11 @@ import {
   toToolResultContent,
   toUserBlocks,
 } from "../src/providers/claude/conversation.ts";
-import { coldStartBlocks, matchSession, type SessionLike } from "../src/providers/claude/provider.ts";
+import {
+  coldStartBlocks,
+  matchSession,
+  type SessionLike,
+} from "../src/providers/claude/provider.ts";
 
 const user = (content: string): ChatMessage => ({ role: "user", content });
 const calls = (...ids: string[]): ChatMessage => ({
@@ -17,7 +21,11 @@ const calls = (...ids: string[]): ChatMessage => ({
   content: "",
   tool_calls: ids.map((id) => ({ id, type: "function", function: { name: "f", arguments: "{}" } })),
 });
-const result = (id: string, content = "ok"): ChatMessage => ({ role: "tool", tool_call_id: id, content });
+const result = (id: string, content = "ok"): ChatMessage => ({
+  role: "tool",
+  tool_call_id: id,
+  content,
+});
 
 function session(over: Partial<SessionLike> & { history: ChatMessage[] }): SessionLike {
   return {
@@ -44,7 +52,10 @@ test("splitSystem takes only leading system and developer messages", () => {
 test("fingerprints ignore whitespace and identify tool-call turns by ids", () => {
   assert.equal(fingerprint(user("hello  world\n")), fingerprint(user("hello world")));
   assert.equal(fingerprint(calls("x", "y")), assistantFingerprint("whatever text", ["x", "y"]));
-  assert.equal(fingerprint({ role: "assistant", content: " done " }), assistantFingerprint("done", []));
+  assert.equal(
+    fingerprint({ role: "assistant", content: " done " }),
+    assistantFingerprint("done", []),
+  );
 });
 
 test("sessionKey changes with model, effort, system and tools", () => {
@@ -53,7 +64,10 @@ test("sessionKey changes with model, effort, system and tools", () => {
   assert.notEqual(k, sessionKey({ ...base, model: "sonnet" }));
   assert.notEqual(k, sessionKey({ ...base, effort: "high" }));
   assert.notEqual(k, sessionKey({ ...base, system: "t" }));
-  assert.notEqual(k, sessionKey({ ...base, tools: [{ type: "function", function: { name: "f" } }] }));
+  assert.notEqual(
+    k,
+    sessionKey({ ...base, tools: [{ type: "function", function: { name: "f" } }] }),
+  );
 });
 
 test("content conversion handles data-url images and unknown parts", () => {
@@ -62,7 +76,10 @@ test("content conversion handles data-url images and unknown parts", () => {
     { type: "image_url", image_url: { url: "data:image/png;base64,AAAA" } },
     { type: "input_audio", input_audio: {} },
   ]);
-  assert.deepEqual(blocks[1], { type: "image", source: { type: "base64", media_type: "image/png", data: "AAAA" } });
+  assert.deepEqual(blocks[1], {
+    type: "image",
+    source: { type: "base64", media_type: "image/png", data: "AAAA" },
+  });
   assert.equal(blocks[2]!.type, "text");
   assert.deepEqual(toToolResultContent("plain"), [{ type: "text", text: "plain" }]);
 });
@@ -73,10 +90,7 @@ test("a request answering pending tool calls resumes the awaiting session", () =
   const conversation = [...history, result("t1", "one"), result("t2", "two")];
   const m = matchSession([s], "k", conversation, conversation.map(fingerprint));
   assert.equal(m.kind, "tools");
-  assert.deepEqual(
-    m.kind === "tools" ? m.results.map((r) => r.id) : [],
-    ["t1", "t2"],
-  );
+  assert.deepEqual(m.kind === "tools" ? m.results.map((r) => r.id) : [], ["t1", "t2"]);
 });
 
 test("user content after tool results rides on the last result", () => {
@@ -98,7 +112,11 @@ test("a follow-up user message continues an idle session", () => {
 
 test("edited history, another key, or a busy session do not match", () => {
   const history = [user("hi"), { role: "assistant", content: "hello" } as ChatMessage];
-  const conversation = [user("hi"), { role: "assistant", content: "EDITED" } as ChatMessage, user("next")];
+  const conversation = [
+    user("hi"),
+    { role: "assistant", content: "EDITED" } as ChatMessage,
+    user("next"),
+  ];
   const prints = conversation.map(fingerprint);
   assert.equal(matchSession([session({ history })], "k", conversation, prints).kind, "none");
 
@@ -116,7 +134,13 @@ test("results for calls the session did not make do not match", () => {
 });
 
 test("cold start renders history as a transcript before the new user message", () => {
-  const blocks = coldStartBlocks([user("first"), calls("t1"), result("t1", "42"), { role: "assistant", content: "it is 42" }, user("thanks")]);
+  const blocks = coldStartBlocks([
+    user("first"),
+    calls("t1"),
+    result("t1", "42"),
+    { role: "assistant", content: "it is 42" },
+    user("thanks"),
+  ]);
   assert.equal(blocks.length, 2);
   assert.match((blocks[0] as { text: string }).text, /\[tool result t1\]\n42/);
   assert.deepEqual(blocks[1], { type: "text", text: "thanks" });

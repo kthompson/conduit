@@ -1,7 +1,13 @@
 import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { loadConfig, userConfigPath, expandHome, type Config, type ProviderName } from "./config.ts";
+import {
+  loadConfig,
+  userConfigPath,
+  expandHome,
+  type Config,
+  type ProviderName,
+} from "./config.ts";
 import { log, setLogLevel } from "./log.ts";
 import { ClaudeProvider, openProbe } from "./providers/claude/provider.ts";
 import { MockProvider } from "./providers/mock/provider.ts";
@@ -48,9 +54,13 @@ async function main() {
       "no-probe": { type: "boolean" },
     },
     // `--capture` may be given without a directory.
-    args: process.argv.slice(2).flatMap((a, i, all) =>
-      a === "--capture" && (all[i + 1] === undefined || all[i + 1]!.startsWith("-")) ? ["--capture", ""] : [a],
-    ),
+    args: process.argv
+      .slice(2)
+      .flatMap((a, i, all) =>
+        a === "--capture" && (all[i + 1] === undefined || all[i + 1]!.startsWith("-"))
+          ? ["--capture", ""]
+          : [a],
+      ),
   });
   const command = positionals[0] ?? "serve";
   if (values.help || command === "help") return void process.stdout.write(HELP);
@@ -93,7 +103,10 @@ async function main() {
 
 async function serve(config: Config) {
   const providers: Partial<Record<ProviderName, Provider>> = { mock: new MockProvider() };
-  if (config.defaultProvider === "claude" || Object.values(config.models).some((m) => m.provider === "claude")) {
+  if (
+    config.defaultProvider === "claude" ||
+    Object.values(config.models).some((m) => m.provider === "claude")
+  ) {
     providers.claude = new ClaudeProvider(config.claude);
   }
   const server = await startServer(config, providers);
@@ -103,8 +116,14 @@ async function serve(config: Config) {
     config: config.source ?? "(defaults)",
   });
   if (server.recorder.dir) log.info(`capturing to ${server.recorder.dir}`);
-  if (config.server.host !== "127.0.0.1" && config.server.host !== "localhost" && !config.server.apiKey) {
-    log.warn("listening beyond localhost without server.api_key; anyone who can reach this port can use your subscription");
+  if (
+    config.server.host !== "127.0.0.1" &&
+    config.server.host !== "localhost" &&
+    !config.server.apiKey
+  ) {
+    log.warn(
+      "listening beyond localhost without server.api_key; anyone who can reach this port can use your subscription",
+    );
   }
 
   let stopping = false;
@@ -119,7 +138,10 @@ async function serve(config: Config) {
   process.on("SIGTERM", stop);
 }
 
-async function setup(config: Config, values: { write?: boolean; "no-efforts"?: boolean; db?: string; "no-probe"?: boolean }) {
+async function setup(
+  config: Config,
+  values: { write?: boolean; "no-efforts"?: boolean; db?: string; "no-probe"?: boolean },
+) {
   const host = config.server.host === "0.0.0.0" ? "127.0.0.1" : config.server.host;
   const baseUrl = `http://${host}:${config.server.port}/v1`;
   const claude = new ClaudeProvider(config.claude);
@@ -184,7 +206,12 @@ async function doctor(config: Config) {
         : `login (${account.tokenSource ?? "source unknown"})`;
     ok(`Claude Code reachable; auth: ${auth}`);
     const list = await q.supportedModels();
-    ok(`models: ${list.filter((m) => m.value !== "default").map((m) => m.resolvedModel ?? m.value).join(", ")}`);
+    ok(
+      `models: ${list
+        .filter((m) => m.value !== "default")
+        .map((m) => m.resolvedModel ?? m.value)
+        .join(", ")}`,
+    );
   } catch (error) {
     bad(`could not talk to Claude Code: ${error instanceof Error ? error.message : String(error)}`);
     process.stdout.write("        Run `claude` once and log in, or set providers.claude.binary.\n");

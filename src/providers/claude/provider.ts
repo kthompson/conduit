@@ -70,7 +70,9 @@ export class ClaudeProvider implements Provider {
         ...(learned ?? {}),
         ownedBy: "anthropic",
         displayName: info.displayName,
-        ...(info.supportsEffort && info.supportedEffortLevels ? { supportedEfforts: info.supportedEffortLevels } : {}),
+        ...(info.supportsEffort && info.supportedEffortLevels
+          ? { supportedEfforts: info.supportedEffortLevels }
+          : {}),
       });
     }
     return out;
@@ -79,9 +81,18 @@ export class ClaudeProvider implements Provider {
   /** Runs one tiny turn so Claude Code reports this model's real limits; they then show up in listModels(). */
   async probe(model: string): Promise<boolean> {
     const trace = new Trace(false, {} as TraceRecord, undefined);
-    const request = { model, messages: [{ role: "user" as const, content: "Reply with the single word: ok" }] };
+    const request = {
+      model,
+      messages: [{ role: "user" as const, content: "Reply with the single word: ok" }],
+    };
     let failed = false;
-    for await (const event of this.turn({ request, upstreamModel: model, effort: undefined, signal: AbortSignal.timeout(90_000), trace })) {
+    for await (const event of this.turn({
+      request,
+      upstreamModel: model,
+      effort: undefined,
+      signal: AbortSignal.timeout(90_000),
+      trace,
+    })) {
       if (event.type === "error") failed = true;
     }
     return !failed;
@@ -117,7 +128,15 @@ export class ClaudeProvider implements Provider {
     } else {
       this.evictForNewSession();
       const session = new ClaudeSession(
-        { key, model: input.upstreamModel, effort: input.effort, system, tools, config: this.config, onLimits: (m, l) => this.recordLimits(m, l) },
+        {
+          key,
+          model: input.upstreamModel,
+          effort: input.effort,
+          system,
+          tools,
+          config: this.config,
+          onLimits: (m, l) => this.recordLimits(m, l),
+        },
         (s) => this.sessions.delete(s),
       );
       this.sessions.add(session);
@@ -127,7 +146,11 @@ export class ClaudeProvider implements Provider {
         historyMessages: conversation.length,
         liveSessions: this.sessions.size,
       });
-      log.info("new claude session", { session: session.id, model: input.upstreamModel, history: conversation.length });
+      log.info("new claude session", {
+        session: session.id,
+        model: input.upstreamModel,
+        history: conversation.length,
+      });
       events = session.sendUser(blocks, prints, input.trace, input.signal);
     }
     yield* events;
@@ -140,10 +163,15 @@ export class ClaudeProvider implements Provider {
 
   private evictForNewSession(): void {
     if (this.sessions.size < this.config.maxSessions) return;
-    const idle = [...this.sessions].filter((s) => s.state !== "busy").sort((a, b) => a.lastUsed - b.lastUsed);
+    const idle = [...this.sessions]
+      .filter((s) => s.state !== "busy")
+      .sort((a, b) => a.lastUsed - b.lastUsed);
     const oldest = idle[0];
     if (oldest) oldest.close("evicted for a new session");
-    else log.warn("all claude sessions are busy; exceeding max_sessions", { max: this.config.maxSessions });
+    else
+      log.warn("all claude sessions are busy; exceeding max_sessions", {
+        max: this.config.maxSessions,
+      });
   }
 
   private reapIdle(): void {
@@ -248,7 +276,8 @@ function userLikeBlocks(m: ChatMessage): UserBlock[] {
 
 function blockToResult(block: UserBlock): ToolResultContent {
   if (block.type === "text") return block;
-  if (block.source.type === "base64") return { type: "image", data: block.source.data, mimeType: block.source.media_type };
+  if (block.source.type === "base64")
+    return { type: "image", data: block.source.data, mimeType: block.source.media_type };
   return { type: "text", text: `[image: ${block.source.url}]` };
 }
 
@@ -264,12 +293,18 @@ export function coldStartBlocks(conversation: ChatMessage[]): UserBlock[] {
 
   const blocks: UserBlock[] = [];
   if (history.length > 0) {
-    blocks.push({ type: "text", text: `${TRANSCRIPT_PREAMBLE}\n\n<transcript>\n${renderTranscript(history)}\n</transcript>` });
+    blocks.push({
+      type: "text",
+      text: `${TRANSCRIPT_PREAMBLE}\n\n<transcript>\n${renderTranscript(history)}\n</transcript>`,
+    });
   }
   if (latest.length > 0) {
     blocks.push(...latest.flatMap(userLikeBlocks));
   } else if (history.at(-1)?.role === "tool") {
-    blocks.push({ type: "text", text: "The latest tool results are at the end of the transcript. Continue." });
+    blocks.push({
+      type: "text",
+      text: "The latest tool results are at the end of the transcript. Continue.",
+    });
   } else {
     blocks.push({ type: "text", text: "Continue." });
   }

@@ -83,7 +83,12 @@ export class ClaudeSession {
   }
 
   /** Starts a turn from new user content. */
-  sendUser(blocks: UserBlock[], incoming: string[], trace: Trace, signal: AbortSignal): AsyncIterable<TurnEvent> {
+  sendUser(
+    blocks: UserBlock[],
+    incoming: string[],
+    trace: Trace,
+    signal: AbortSignal,
+  ): AsyncIterable<TurnEvent> {
     const events = this.begin(incoming, trace, signal);
     this.input.push({
       type: "user",
@@ -106,7 +111,9 @@ export class ClaudeSession {
     for (const r of results) this.bridge.deliver(r.id, r.content);
     for (const id of this.pendingToolIds) {
       if (!answered.has(id)) {
-        this.bridge.deliver(id, [{ type: "text", text: "The client did not return a result for this tool call." }]);
+        this.bridge.deliver(id, [
+          { type: "text", text: "The client did not return a result for this tool call." },
+        ]);
       }
     }
     this.pendingToolIds = [];
@@ -140,7 +147,11 @@ export class ClaudeSession {
       usage: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
       streamed: false,
     };
-    trace.note("claude session", { session: this.id, model: this.model, transcriptLength: this.transcript.length });
+    trace.note("claude session", {
+      session: this.id,
+      model: this.model,
+      transcriptLength: this.transcript.length,
+    });
     signal.addEventListener(
       "abort",
       () => {
@@ -172,7 +183,11 @@ export class ClaudeSession {
         return this.handleResult(message);
       case "system":
         if (message.subtype === "init") {
-          log.debug("claude session ready", { session: this.id, model: message.model, tools: message.tools.length });
+          log.debug("claude session ready", {
+            session: this.id,
+            model: message.model,
+            tools: message.tools.length,
+          });
         }
         return;
       default:
@@ -258,7 +273,10 @@ export class ClaudeSession {
   private handleResult(result: Extract<SDKMessage, { type: "result" }>): void {
     for (const [name, usage] of Object.entries(result.modelUsage ?? {})) {
       if (usage.contextWindow > 0) {
-        this.onLimits?.(name, { contextWindow: usage.contextWindow, maxOutputTokens: usage.maxOutputTokens });
+        this.onLimits?.(name, {
+          contextWindow: usage.contextWindow,
+          maxOutputTokens: usage.maxOutputTokens,
+        });
       }
     }
     if (this.awaitingResult) {
@@ -267,12 +285,15 @@ export class ClaudeSession {
     }
     const turn = this.turn;
     if (!turn) {
-      if (result.is_error) log.warn("claude reported an error outside a turn", { session: this.id });
+      if (result.is_error)
+        log.warn("claude reported an error outside a turn", { session: this.id });
       return;
     }
     if (result.is_error || result.subtype !== "success") {
       const detail =
-        result.subtype === "success" ? result.result : (result.errors ?? []).join("; ") || result.subtype;
+        result.subtype === "success"
+          ? result.result
+          : (result.errors ?? []).join("; ") || result.subtype;
       this.endTurn({ type: "error", message: detail || "Claude Code reported an error." });
       this.close("turn failed");
       return;
@@ -350,7 +371,9 @@ function buildOptions(options: SessionOptions, bridge: ToolBridge): Options {
     cwd: config.cwd,
     env,
     ...(effort === undefined ? {} : { effort }),
-    ...(config.reasoning === "none" ? {} : { thinking: { type: "adaptive", display: "summarized" } }),
+    ...(config.reasoning === "none"
+      ? {}
+      : { thinking: { type: "adaptive", display: "summarized" } }),
     ...(config.binary === undefined ? {} : { pathToClaudeCodeExecutable: config.binary }),
     stderr: (data) => log.debug("claude stderr", { data: data.trimEnd() }),
   };

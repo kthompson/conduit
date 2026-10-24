@@ -1,7 +1,13 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-const REDACTED_HEADERS = new Set(["authorization", "x-api-key", "api-key", "cookie", "proxy-authorization"]);
+const REDACTED_HEADERS = new Set([
+  "authorization",
+  "x-api-key",
+  "api-key",
+  "cookie",
+  "proxy-authorization",
+]);
 
 export interface TraceRecord {
   seq: number;
@@ -75,7 +81,12 @@ export class Recorder {
     return this.dir !== undefined;
   }
 
-  start(method: string, url: string, headers: Record<string, string | string[] | undefined>, body: unknown): Trace {
+  start(
+    method: string,
+    url: string,
+    headers: Record<string, string | string[] | undefined>,
+    body: unknown,
+  ): Trace {
     const seq = ++this.seq;
     const record: TraceRecord = {
       seq,
@@ -85,18 +96,29 @@ export class Recorder {
       upstream: [],
     };
     if (this.dir === undefined) return new Trace(false, record, undefined);
-    const slug = url.replace(/^\/+/, "").replace(/[^a-zA-Z0-9]+/g, "_").slice(0, 60) || "root";
-    const file = path.join(this.dir, `${String(seq).padStart(4, "0")}-${method.toLowerCase()}-${slug}.json`);
+    const slug =
+      url
+        .replace(/^\/+/, "")
+        .replace(/[^a-zA-Z0-9]+/g, "_")
+        .slice(0, 60) || "root";
+    const file = path.join(
+      this.dir,
+      `${String(seq).padStart(4, "0")}-${method.toLowerCase()}-${slug}.json`,
+    );
     return new Trace(true, record, file);
   }
 }
 
-function redactHeaders(headers: Record<string, string | string[] | undefined>): Record<string, string> {
+function redactHeaders(
+  headers: Record<string, string | string[] | undefined>,
+): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(headers)) {
     if (value === undefined) continue;
     const joined = Array.isArray(value) ? value.join(", ") : value;
-    out[key] = REDACTED_HEADERS.has(key.toLowerCase()) ? `<redacted ${joined.length} chars>` : joined;
+    out[key] = REDACTED_HEADERS.has(key.toLowerCase())
+      ? `<redacted ${joined.length} chars>`
+      : joined;
   }
   return out;
 }

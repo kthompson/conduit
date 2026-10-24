@@ -1,6 +1,5 @@
 # TODO
 
-- [ ] Add oxlint + oxfmt (lint/format scripts, config, CI check)
 - [ ] Run `conduit capture` against Copilot Desktop/CLI and record which routes, params and
       message shapes it uses (system prompt stability, `reasoning_effort`, tool_choice, extra fields)
 - [ ] `/v1/responses` front end (Copilot's `wireApi: "responses"`)

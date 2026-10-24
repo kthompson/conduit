@@ -20,7 +20,13 @@ function makeDb() {
   return file;
 }
 
-const model = { id: "m", displayName: "M", contextWindow: 1_000_000, maxOutputTokens: 64_000, efforts: ["low", "high"] };
+const model = {
+  id: "m",
+  displayName: "M",
+  contextWindow: 1_000_000,
+  maxOutputTokens: 64_000,
+  efforts: ["low", "high"],
+};
 
 test("promptBudget reserves the output tokens", () => {
   assert.equal(promptBudget(model), 936_000);
@@ -59,7 +65,9 @@ test("efforts are written by default and skipped when disabled", () => {
   const base = { dbPath, baseUrl: "http://127.0.0.1:4100/v1", models: [model], write: true };
   const read = () => {
     const db = new DatabaseSync(dbPath);
-    const r = db.prepare("SELECT supported_reasoning_efforts AS e FROM provider_models").get() as { e: string | null };
+    const r = db.prepare("SELECT supported_reasoning_efforts AS e FROM provider_models").get() as {
+      e: string | null;
+    };
     db.close();
     return r.e;
   };

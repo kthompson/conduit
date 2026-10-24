@@ -24,13 +24,20 @@ interface Route {
   effort: string | undefined;
 }
 
-export async function startServer(config: Config, providers: Partial<Record<ProviderName, Provider>>): Promise<ConduitServer> {
+export async function startServer(
+  config: Config,
+  providers: Partial<Record<ProviderName, Provider>>,
+): Promise<ConduitServer> {
   const recorder = new Recorder(config.capture.enabled ? config.capture.dir : undefined);
 
   const resolve = (model: string): Route => {
     const explicit = config.models[model];
     if (explicit) {
-      return { provider: need(explicit.provider), upstream: explicit.upstream ?? model, effort: explicit.effort };
+      return {
+        provider: need(explicit.provider),
+        upstream: explicit.upstream ?? model,
+        effort: explicit.effort,
+      };
     }
     const suffix = EFFORT_SUFFIX.exec(model);
     const base = suffix ? suffix[1]! : model;
@@ -41,7 +48,12 @@ export async function startServer(config: Config, providers: Partial<Record<Prov
 
   const need = (name: ProviderName): Provider => {
     const provider = providers[name];
-    if (!provider) throw new HttpError(400, `provider "${name}" is not enabled on this server`, "model_not_found");
+    if (!provider)
+      throw new HttpError(
+        400,
+        `provider "${name}" is not enabled on this server`,
+        "model_not_found",
+      );
     return provider;
   };
 
@@ -61,7 +73,8 @@ export async function startServer(config: Config, providers: Partial<Record<Prov
     try {
       if (bodyError !== undefined) throw bodyError;
       if (req.method === "OPTIONS") return send(res, trace, 204, undefined);
-      if (path === "/health" || path === "/") return send(res, trace, 200, { status: "ok", name: "conduit" });
+      if (path === "/health" || path === "/")
+        return send(res, trace, 200, { status: "ok", name: "conduit" });
       authorize(req, config.server.apiKey);
 
       if (req.method === "GET" && path === "/models") {
@@ -70,13 +83,18 @@ export async function startServer(config: Config, providers: Partial<Record<Prov
       if (req.method === "POST" && path === "/chat/completions") {
         return await chat(req, res, trace, body, resolve, config);
       }
-      throw new HttpError(404, `conduit does not implement ${req.method} ${url.pathname}`, "not_found");
+      throw new HttpError(
+        404,
+        `conduit does not implement ${req.method} ${url.pathname}`,
+        "not_found",
+      );
     } catch (error) {
       const status = error instanceof HttpError ? error.status : 500;
       const code = error instanceof HttpError ? error.code : "internal_error";
       const message = error instanceof Error ? error.message : String(error);
       if (status >= 500) log.error("request failed", { path: url.pathname, error: message });
-      else log.warn("request rejected", { method: req.method, path: url.pathname, status, message });
+      else
+        log.warn("request rejected", { method: req.method, path: url.pathname, status, message });
       if (!res.headersSent) send(res, trace, status, errorBody(message, code));
       else if (!res.writableEnded) res.end();
     }
@@ -157,10 +175,13 @@ async function chat(
 }
 
 function validateChat(body: unknown): ChatCompletionRequest {
-  if (typeof body !== "object" || body === null) throw new HttpError(400, "request body must be a JSON object");
+  if (typeof body !== "object" || body === null)
+    throw new HttpError(400, "request body must be a JSON object");
   const r = body as Partial<ChatCompletionRequest>;
-  if (typeof r.model !== "string" || r.model.length === 0) throw new HttpError(400, "`model` is required");
-  if (!Array.isArray(r.messages) || r.messages.length === 0) throw new HttpError(400, "`messages` must be a non-empty array");
+  if (typeof r.model !== "string" || r.model.length === 0)
+    throw new HttpError(400, "`model` is required");
+  if (!Array.isArray(r.messages) || r.messages.length === 0)
+    throw new HttpError(400, "`messages` must be a non-empty array");
   for (const m of r.messages) {
     if (typeof m !== "object" || m === null || typeof (m as { role?: unknown }).role !== "string") {
       throw new HttpError(400, "every message needs a `role`");
@@ -169,7 +190,8 @@ function validateChat(body: unknown): ChatCompletionRequest {
       throw new HttpError(400, "tool messages need a `tool_call_id`");
     }
   }
-  if (r.tools !== undefined && !Array.isArray(r.tools)) throw new HttpError(400, "`tools` must be an array");
+  if (r.tools !== undefined && !Array.isArray(r.tools))
+    throw new HttpError(400, "`tools` must be an array");
   return r as ChatCompletionRequest;
 }
 
@@ -209,8 +231,12 @@ async function listModels(config: Config, providers: Partial<Record<ProviderName
 function authorize(req: IncomingMessage, apiKey: string | undefined) {
   if (apiKey === undefined) return;
   const header = req.headers.authorization;
-  const bearer = typeof header === "string" && header.startsWith("Bearer ") ? header.slice(7) : undefined;
-  const key = bearer ?? (req.headers["x-api-key"] as string | undefined) ?? (req.headers["api-key"] as string | undefined);
+  const bearer =
+    typeof header === "string" && header.startsWith("Bearer ") ? header.slice(7) : undefined;
+  const key =
+    bearer ??
+    (req.headers["x-api-key"] as string | undefined) ??
+    (req.headers["api-key"] as string | undefined);
   if (key !== apiKey) throw new HttpError(401, "invalid API key", "invalid_api_key");
 }
 

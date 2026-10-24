@@ -47,13 +47,13 @@ carry `/v1` or not. For other surfaces, such as Copilot Desktop, run `conduit ca
 
 ## Commands
 
-| Command | What it does |
-| --- | --- |
-| `conduit serve` | Serve Chat Completions backed by Claude Code |
-| `conduit capture` | Serve the **mock** model and record every exchange to JSON |
-| `conduit models` | List the models your login can use |
-| `conduit doctor` | Check Claude Code, auth source and models |
-| `conduit init` | Write the example config to `~/.config/conduit/config.toml` |
+| Command           | What it does                                                |
+| ----------------- | ----------------------------------------------------------- |
+| `conduit serve`   | Serve Chat Completions backed by Claude Code                |
+| `conduit capture` | Serve the **mock** model and record every exchange to JSON  |
+| `conduit models`  | List the models your login can use                          |
+| `conduit doctor`  | Check Claude Code, auth source and models                   |
+| `conduit init`    | Write the example config to `~/.config/conduit/config.toml` |
 
 Flags: `-c/--config`, `-p/--port`, `-H/--host`, `--provider claude|mock`, `--capture [dir]`, `-v`.
 
