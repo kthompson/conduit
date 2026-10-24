@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import {
   query,
   type EffortLevel,
@@ -11,10 +10,11 @@ import {
 import { Channel } from "../../channel.ts";
 import type { ClaudeConfig } from "../../config.ts";
 import type { Trace } from "../../capture/recorder.ts";
-import type { FinishReason, FunctionTool, Usage } from "../../openai/types.ts";
+import type { ChatMessage, FinishReason, FunctionTool, Usage } from "../../openai/types.ts";
 import { log } from "../../log.ts";
 import type { TurnEvent } from "../types.ts";
 import { assistantFingerprint, type ToolResultContent, type UserBlock } from "./conversation.ts";
+import { buildSeedEntries, scratchConfigDir, SeedStore } from "./seed.ts";
 import { BRIDGE_SERVER, ToolBridge } from "./toolBridge.ts";
 
 const DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant.";
@@ -29,6 +29,8 @@ export interface SessionOptions {
   system: string;
   tools: FunctionTool[];
   config: ClaudeConfig;
+  /** Earlier conversation to resume as real turns; empty or omitted for a fresh session. */
+  history?: ChatMessage[];
   /** Receives the real context window and output cap Claude Code reports after a turn. */
   onLimits?: (model: string, limits: { contextWindow: number; maxOutputTokens: number }) => void;
 }
@@ -52,7 +54,7 @@ interface ActiveTurn {
  * them, including across a client-side tool round trip.
  */
 export class ClaudeSession {
-  readonly id = randomUUID().slice(0, 8);
+  readonly id = crypto.randomUUID().slice(0, 8);
   readonly key: string;
   readonly model: string;
   state: SessionState = "idle";
@@ -71,6 +73,8 @@ export class ClaudeSession {
   private readonly onClose: (session: ClaudeSession) => void;
 
   private readonly onLimits: SessionOptions["onLimits"];
+  /** Removes the scratch config dir of a resumed session. */
+  private cleanup: (() => void) | undefined;
 
   constructor(options: SessionOptions, onClose: (session: ClaudeSession) => void) {
     this.key = options.key;
@@ -78,7 +82,11 @@ export class ClaudeSession {
     this.onClose = onClose;
     this.onLimits = options.onLimits;
     this.bridge = new ToolBridge(options.tools);
-    this.query = query({ prompt: this.input, options: buildOptions(options, this.bridge) });
+    const resume = this.seed(options);
+    this.query = query({
+      prompt: this.input,
+      options: { ...buildOptions(options, this.bridge), ...resume },
+    });
     void this.pump();
   }
 
@@ -128,7 +136,29 @@ export class ClaudeSession {
     if (this.turn) this.endTurn({ type: "error", message: `Claude session closed: ${reason}` });
     this.input.end();
     this.query.close();
+    this.cleanup?.();
     this.onClose(this);
+  }
+
+  /** Options that resume `history` as real turns instead of starting empty. */
+  private seed(options: SessionOptions): Partial<Options> {
+    if (!options.history || options.history.length === 0) return {};
+    const sessionId = crypto.randomUUID();
+    const entries = buildSeedEntries({
+      sessionId,
+      cwd: options.config.cwd,
+      model: options.model,
+      history: options.history,
+      toolName: (name) => this.bridge.claudeName(name),
+    });
+    const scratch = scratchConfigDir(options.config.env.CLAUDE_CONFIG_DIR);
+    this.cleanup = scratch.remove;
+    return {
+      resume: sessionId,
+      sessionStore: new SeedStore(sessionId, entries),
+      persistSession: true,
+      env: { ...buildEnv(options.config), CLAUDE_CONFIG_DIR: scratch.dir },
+    };
   }
 
   private begin(incoming: string[], trace: Trace, signal: AbortSignal): AsyncIterable<TurnEvent> {
@@ -331,14 +361,19 @@ export class ClaudeSession {
   }
 }
 
-function buildOptions(options: SessionOptions, bridge: ToolBridge): Options {
-  const { config } = options;
+function buildEnv(config: ClaudeConfig): Record<string, string | undefined> {
   const env: Record<string, string | undefined> = {
     ...process.env,
     ...config.env,
     CLAUDE_AGENT_SDK_CLIENT_APP: "conduit/0.1.0",
   };
   if (config.stripApiKey) delete env.ANTHROPIC_API_KEY;
+  return env;
+}
+
+function buildOptions(options: SessionOptions, bridge: ToolBridge): Options {
+  const { config } = options;
+  const env = buildEnv(config);
 
   let effort: EffortLevel | undefined;
   if (options.effort !== undefined) {

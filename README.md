@@ -94,7 +94,9 @@ process per conversation and recognizes each new request as a continuation of it
 - **Follow-up turn.** When a request's history extends a session's, only the new user
   message is sent.
 - **Anything else** (a restart, a model switch, edited history) starts a fresh process.
-  The earlier history goes in as a transcript, so the conversation still carries on.
+  The earlier history is resumed as real turns (user text, assistant text, `tool_use` and
+  `tool_result` blocks), so the conversation carries on and a restarted server picks up where
+  it left off. Thinking is not replayed.
 
 A session is identified by system prompt, tool set, model and effort. Sessions close
 after `session_idle_seconds`, and a client that disconnects mid-turn closes its session.
