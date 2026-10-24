@@ -9,11 +9,7 @@ import {
   toToolResultContent,
   toUserBlocks,
 } from "../src/providers/claude/conversation.ts";
-import {
-  coldStartBlocks,
-  matchSession,
-  type SessionLike,
-} from "../src/providers/claude/provider.ts";
+import { coldStart, matchSession, type SessionLike } from "../src/providers/claude/provider.ts";
 
 const user = (content: string): ChatMessage => ({ role: "user", content });
 const calls = (...ids: string[]): ChatMessage => ({
@@ -133,20 +129,20 @@ test("results for calls the session did not make do not match", () => {
   assert.equal(matchSession([s], "k", conversation, conversation.map(fingerprint)).kind, "none");
 });
 
-test("cold start renders history as a transcript before the new user message", () => {
-  const blocks = coldStartBlocks([
+test("cold start splits history from the trailing user message", () => {
+  const { history, blocks } = coldStart([
     user("first"),
     calls("t1"),
     result("t1", "42"),
     { role: "assistant", content: "it is 42" },
     user("thanks"),
   ]);
-  assert.equal(blocks.length, 2);
-  assert.match((blocks[0] as { text: string }).text, /\[tool result t1\]\n42/);
-  assert.deepEqual(blocks[1], { type: "text", text: "thanks" });
+  assert.equal(history.length, 4);
+  assert.deepEqual(blocks, [{ type: "text", text: "thanks" }]);
 });
 
 test("cold start that ends on tool results asks Claude to continue", () => {
-  const blocks = coldStartBlocks([user("go"), calls("t1"), result("t1")]);
+  const { history, blocks } = coldStart([user("go"), calls("t1"), result("t1")]);
+  assert.equal(history.length, 3);
   assert.match((blocks.at(-1) as { text: string }).text, /Continue/);
 });

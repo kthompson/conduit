@@ -63,6 +63,11 @@ export class ToolBridge {
     return this.toClient.get(claudeToolName.slice(PREFIX.length));
   }
 
+  /** Full Claude Code tool name for a client tool, as it appears in tool_use blocks. */
+  claudeName(clientName: string): string {
+    return PREFIX + (this.toClaude.get(clientName) ?? aliasFor(clientName));
+  }
+
   deliver(toolUseId: string, content: ToolResultContent[]): void {
     const result: CallToolResult = { content };
     const waiter = this.waiters.get(toolUseId);
