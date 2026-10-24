@@ -23,5 +23,5 @@
   - `x-initiator` (user/agent) and `x-interaction-type` (conversation-user, -subagent,
     -compaction) headers identify Copilot's internal requests
 - [x] Cold-start fidelity: new sessions resume the earlier history as real turns (user text,
-  assistant text, `tool_use`/`tool_result`) through the SDK `sessionStore`, so a restarted
-  server picks up mid-conversation. Thinking is not replayed (signatures can't be forged)
+      assistant text, `tool_use`/`tool_result`) through the SDK `sessionStore`, so a restarted
+      server picks up mid-conversation. Thinking is not replayed (signatures can't be forged)
