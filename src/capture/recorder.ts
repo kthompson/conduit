@@ -72,7 +72,7 @@ export class Recorder {
       this.dir = undefined;
       return;
     }
-    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const stamp = new Date().toISOString().replaceAll(/[:.]/g, "-");
     this.dir = path.join(baseDir, stamp);
     mkdirSync(this.dir, { recursive: true });
   }
@@ -99,7 +99,7 @@ export class Recorder {
     const slug =
       url
         .replace(/^\/+/, "")
-        .replace(/[^a-zA-Z0-9]+/g, "_")
+        .replaceAll(/[^a-zA-Z0-9]+/g, "_")
         .slice(0, 60) || "root";
     const file = path.join(
       this.dir,

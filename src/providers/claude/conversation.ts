@@ -20,7 +20,7 @@ export type ToolResultContent =
   | { type: "image"; data: string; mimeType: string };
 
 const hash = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 16);
-const normalize = (text: string) => text.replace(/\s+/g, " ").trim();
+const normalize = (text: string) => text.replaceAll(/\s+/g, " ").trim();
 
 /**
  * Splits a request into the system prompt (leading system/developer messages)
@@ -33,11 +33,9 @@ export function splitSystem(messages: ChatMessage[]): {
 } {
   let i = 0;
   const parts: string[] = [];
-  while (
-    i < messages.length &&
-    (messages[i]!.role === "system" || messages[i]!.role === "developer")
-  ) {
-    parts.push(textOf(messages[i]!.content));
+  for (const m of messages) {
+    if (m.role !== "system" && m.role !== "developer") break;
+    parts.push(textOf(m.content));
     i++;
   }
   return { system: parts.join("\n\n"), conversation: messages.slice(i) };
@@ -90,9 +88,10 @@ function countImages(content: string | ContentPart[] | null | undefined): number
 }
 
 export function toUserBlocks(content: string | ContentPart[] | null | undefined): UserBlock[] {
-  if (content == null) return [];
-  if (typeof content === "string")
+  if (content === null || content === undefined) return [];
+  if (typeof content === "string") {
     return content.length === 0 ? [] : [{ type: "text", text: content }];
+  }
   const blocks: UserBlock[] = [];
   for (const part of content) {
     if (part.type === "text" && typeof part.text === "string") {
@@ -109,9 +108,10 @@ export function toUserBlocks(content: string | ContentPart[] | null | undefined)
 }
 
 function imageFromUrl(url: string): UserBlock | undefined {
-  const data = /^data:([^;,]+);base64,(.*)$/s.exec(url);
-  if (data)
-    return { type: "image", source: { type: "base64", media_type: data[1]!, data: data[2]! } };
+  const [, mediaType, data] = /^data:([^;,]+);base64,(.*)$/s.exec(url) ?? [];
+  if (mediaType !== undefined && data !== undefined) {
+    return { type: "image", source: { type: "base64", media_type: mediaType, data } };
+  }
   if (/^https?:\/\//.test(url)) return { type: "image", source: { type: "url", url } };
   return undefined;
 }

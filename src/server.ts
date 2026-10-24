@@ -31,7 +31,7 @@ export async function startServer(
 
   const resolve = (model: string): Route => {
     const suffix = EFFORT_SUFFIX.exec(model);
-    const base = suffix ? suffix[1]! : model;
+    const base = suffix?.[1] ?? model;
     const effort = suffix ? suffix[2] : undefined;
     const name: ProviderName = base === "mock" ? "mock" : config.defaultProvider;
     return { provider: need(name), upstream: base, effort };
@@ -39,23 +39,24 @@ export async function startServer(
 
   const need = (name: ProviderName): Provider => {
     const provider = providers[name];
-    if (!provider)
+    if (!provider) {
       throw new HttpError(
         400,
         `provider "${name}" is not enabled on this server`,
         "model_not_found",
       );
+    }
     return provider;
   };
 
   const handle = async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? "/", "http://conduit");
     let body: unknown;
-    let bodyError: unknown;
+    let bodyError: Error | undefined;
     try {
       body = req.method === "POST" ? await readJson(req) : undefined;
     } catch (error) {
-      bodyError = error;
+      bodyError = error instanceof Error ? error : new Error(String(error));
     }
     const trace = recorder.start(req.method ?? "GET", url.pathname + url.search, req.headers, body);
     const path = url.pathname.replace(/^\/v1(?=\/)/, "");
@@ -64,8 +65,9 @@ export async function startServer(
     try {
       if (bodyError !== undefined) throw bodyError;
       if (req.method === "OPTIONS") return send(res, trace, 204, undefined);
-      if (path === "/health" || path === "/")
+      if (path === "/health" || path === "/") {
         return send(res, trace, 200, { status: "ok", name: "conduit" });
+      }
       authorize(req, config.server.apiKey);
 
       if (req.method === "GET" && path === "/models") {
@@ -84,8 +86,9 @@ export async function startServer(
       const code = error instanceof HttpError ? error.code : "internal_error";
       const message = error instanceof Error ? error.message : String(error);
       if (status >= 500) log.error("request failed", { path: url.pathname, error: message });
-      else
+      else {
         log.warn("request rejected", { method: req.method, path: url.pathname, status, message });
+      }
       if (!res.headersSent) send(res, trace, status, errorBody(message, code));
       else if (!res.writableEnded) res.end();
     }
@@ -166,13 +169,16 @@ async function chat(
 }
 
 function validateChat(body: unknown): ChatCompletionRequest {
-  if (typeof body !== "object" || body === null)
+  if (typeof body !== "object" || body === null) {
     throw new HttpError(400, "request body must be a JSON object");
+  }
   const r = body as Partial<ChatCompletionRequest>;
-  if (typeof r.model !== "string" || r.model.length === 0)
+  if (typeof r.model !== "string" || r.model.length === 0) {
     throw new HttpError(400, "`model` is required");
-  if (!Array.isArray(r.messages) || r.messages.length === 0)
+  }
+  if (!Array.isArray(r.messages) || r.messages.length === 0) {
     throw new HttpError(400, "`messages` must be a non-empty array");
+  }
   for (const m of r.messages) {
     if (typeof m !== "object" || m === null || typeof (m as { role?: unknown }).role !== "string") {
       throw new HttpError(400, "every message needs a `role`");
@@ -181,8 +187,9 @@ function validateChat(body: unknown): ChatCompletionRequest {
       throw new HttpError(400, "tool messages need a `tool_call_id`");
     }
   }
-  if (r.tools !== undefined && !Array.isArray(r.tools))
+  if (r.tools !== undefined && !Array.isArray(r.tools)) {
     throw new HttpError(400, "`tools` must be an array");
+  }
   return r as ChatCompletionRequest;
 }
 

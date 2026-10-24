@@ -26,12 +26,16 @@ function* shapeReasoning(
 ): Generator<TurnEvent> {
   if (event.type === "reasoning") {
     if (mode === "none") return;
-    if (mode === "reasoning_content") return yield event;
+    if (mode === "reasoning_content") {
+      yield event;
+      return;
+    }
     if (!state.open) {
       state.open = true;
       yield { type: "text", delta: "<think>\n" };
     }
-    return yield { type: "text", delta: event.delta };
+    yield { type: "text", delta: event.delta };
+    return;
   }
   if (mode === "think_tags" && state.open) {
     state.open = false;

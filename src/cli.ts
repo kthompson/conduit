@@ -57,9 +57,7 @@ async function main() {
     args: process.argv
       .slice(2)
       .flatMap((a, i, all) =>
-        a === "--capture" && (all[i + 1] === undefined || all[i + 1]!.startsWith("-"))
-          ? ["--capture", ""]
-          : [a],
+        a === "--capture" && (all[i + 1]?.startsWith("-") ?? true) ? ["--capture", ""] : [a],
       ),
   });
   const command = positionals[0] ?? "serve";
@@ -131,8 +129,8 @@ async function serve(config: Config) {
     await server.close();
     process.exit(0);
   };
-  process.on("SIGINT", stop);
-  process.on("SIGTERM", stop);
+  process.on("SIGINT", () => void stop());
+  process.on("SIGTERM", () => void stop());
 }
 
 async function setup(
@@ -142,7 +140,7 @@ async function setup(
   const host = config.server.host === "0.0.0.0" ? "127.0.0.1" : config.server.host;
   const baseUrl = `http://${host}:${config.server.port}/v1`;
   const claude = new ClaudeProvider(config.claude);
-  let models: CopilotModel[] = (await claude.listModels()).map((m) => ({
+  let modelList: CopilotModel[] = (await claude.listModels()).map((m) => ({
     id: m.id,
     displayName: m.displayName,
     contextWindow: m.contextWindow ?? config.claude.contextWindow,
@@ -151,12 +149,12 @@ async function setup(
   }));
   if (!values["no-probe"]) {
     process.stdout.write("Probing each model for its real limits (one tiny turn each)...\n");
-    for (const m of models) {
+    for (const m of modelList) {
       const ok = await claude.probe(m.id).catch(() => false);
       process.stdout.write(`  ${ok ? "ok  " : "FAIL"} ${m.id}\n`);
     }
     const learned = new Map((await claude.listModels()).map((m) => [m.id, m]));
-    models = models.map((m) => ({
+    modelList = modelList.map((m) => ({
       ...m,
       contextWindow: learned.get(m.id)?.contextWindow ?? m.contextWindow,
       maxOutputTokens: learned.get(m.id)?.maxOutputTokens ?? m.maxOutputTokens,
@@ -166,7 +164,7 @@ async function setup(
   const lines = setupCopilot({
     dbPath: values.db ?? defaultCopilotDb,
     baseUrl,
-    models,
+    models: modelList,
     write: values.write === true,
     efforts: values["no-efforts"] !== true,
   });
@@ -180,9 +178,10 @@ async function models(config: Config) {
   process.exit(0);
 }
 
+const ok = (msg: string) => process.stdout.write(`  ok    ${msg}\n`);
+const bad = (msg: string) => process.stdout.write(`  FAIL  ${msg}\n`);
+
 async function doctor(config: Config) {
-  const ok = (msg: string) => process.stdout.write(`  ok    ${msg}\n`);
-  const bad = (msg: string) => process.stdout.write(`  FAIL  ${msg}\n`);
   process.stdout.write(`conduit doctor\n`);
   process.stdout.write(`  config: ${config.source ?? "(none, using defaults)"}\n`);
   if (process.env.ANTHROPIC_API_KEY) {

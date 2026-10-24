@@ -35,13 +35,15 @@ export class MockProvider implements Provider {
           yield* this.text(
             `Mock: no tool named \`${name}\` in this request. Tools: ${toolNames(request)}`,
           );
-          return yield { type: "done", finishReason: "stop", usage: undefined };
+          yield { type: "done", finishReason: "stop", usage: undefined };
+          return;
         }
         yield* this.text(`Calling \`${name}\`.`);
-        const id = `call_${randomUUID().replace(/-/g, "").slice(0, 24)}`;
-        yield { type: "tool_call_start", index: 0, id, name: name! };
-        yield { type: "tool_call_args", index: 0, delta: args?.trim() || "{}" };
-        return yield { type: "done", finishReason: "tool_calls", usage: undefined };
+        const id = `call_${randomUUID().replaceAll("-", "").slice(0, 24)}`;
+        yield { type: "tool_call_start", index: 0, id, name: name ?? "" };
+        yield { type: "tool_call_args", index: 0, delta: (args?.trim() ?? "") || "{}" };
+        yield { type: "done", finishReason: "tool_calls", usage: undefined };
+        return;
       }
     }
 
@@ -49,7 +51,8 @@ export class MockProvider implements Provider {
       const results = trailingToolResults(request);
       const lines = results.map((r) => `- \`${r.id}\`: ${truncate(r.text, 400)}`);
       yield* this.text(`Mock received ${results.length} tool result(s):\n${lines.join("\n")}`);
-      return yield { type: "done", finishReason: "stop", usage: undefined };
+      yield { type: "done", finishReason: "stop", usage: undefined };
+      return;
     }
 
     yield* this.text(describe(request));
@@ -73,8 +76,7 @@ function toolNames(request: ChatCompletionRequest): string {
 
 function trailingToolResults(request: ChatCompletionRequest) {
   const out: Array<{ id: string; text: string }> = [];
-  for (let i = request.messages.length - 1; i >= 0; i--) {
-    const m = request.messages[i]!;
+  for (const m of request.messages.toReversed()) {
     if (m.role !== "tool") break;
     out.unshift({ id: m.tool_call_id, text: textOf(m.content) });
   }

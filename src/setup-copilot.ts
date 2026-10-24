@@ -40,8 +40,9 @@ export function promptBudget(
 
 export function setupCopilot(opts: SetupOptions): string[] {
   const dbPath = opts.dbPath ?? defaultCopilotDb;
-  if (!existsSync(dbPath))
+  if (!existsSync(dbPath)) {
     throw new Error(`Copilot Desktop database not found at ${dbPath}. Launch the app once first.`);
+  }
   const name = opts.providerName ?? "Conduit";
   const lines: string[] = [];
   const db = new DatabaseSync(dbPath, { readOnly: !opts.write });

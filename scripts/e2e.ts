@@ -62,20 +62,23 @@ console.log(
   r1.usage,
 );
 messages.push({ role: "assistant", content: r1.content || null, tool_calls: r1.calls });
-for (const c of r1.calls)
+for (const c of r1.calls) {
   messages.push({
     role: "tool",
     tool_call_id: c.id,
     content: `${JSON.parse(c.function.arguments).city}: 21C, sunny`,
   });
+}
 const t1 = Date.now();
 const r2 = await stream({ model: "haiku", messages, tools });
 console.log("R2", Date.now() - t1, "ms", r2.finish, JSON.stringify(r2.content), r2.usage);
-messages.push({ role: "assistant", content: r2.content });
-messages.push({
-  role: "user",
-  content: "Which of the two cities did I ask about first? One word.",
-});
+messages.push(
+  { role: "assistant", content: r2.content },
+  {
+    role: "user",
+    content: "Which of the two cities did I ask about first? One word.",
+  },
+);
 const t2 = Date.now();
 const r3 = await stream({ model: "haiku", messages, tools });
 console.log("R3", Date.now() - t2, "ms", r3.finish, JSON.stringify(r3.content));
