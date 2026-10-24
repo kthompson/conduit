@@ -195,8 +195,9 @@ function str(value: unknown, where: string): string | undefined {
 
 function num(value: unknown, where: string): number | undefined {
   if (value === undefined) return undefined;
-  if (typeof value !== "number" || !Number.isFinite(value))
-    throw new Error(`${where}: expected a number`);
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new TypeError(`${where}: expected a number`);
+  }
   return value;
 }
 
