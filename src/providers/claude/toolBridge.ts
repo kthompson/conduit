@@ -42,13 +42,13 @@ export class ToolBridge {
     );
     this.server.server.setRequestHandler(ListToolsRequestSchema, async () => ({
       tools: tools.map((t) => ({
-        name: this.toClaude.get(t.function.name)!,
+        name: this.toClaude.get(t.function.name) ?? t.function.name,
         description: t.function.description ?? "",
         inputSchema: normalizeSchema(t.function.parameters),
       })),
     }));
     this.server.server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
-      const id = (extra._meta as Record<string, unknown> | undefined)?.["claudecode/toolUseId"];
+      const id = extra._meta?.["claudecode/toolUseId"];
       if (typeof id !== "string") {
         log.warn("claude tool call without a tool_use id", { tool: request.params.name });
         return errorResult("conduit could not match this tool call to the client.");
@@ -106,7 +106,7 @@ export class ToolBridge {
 }
 
 function aliasFor(name: string): string {
-  const safe = name.replace(/[^a-zA-Z0-9_-]/g, "_");
+  const safe = name.replaceAll(/[^a-zA-Z0-9_-]/g, "_");
   if (PREFIX.length + safe.length <= MAX_TOOL_NAME) return safe;
   const digest = createHash("sha256").update(name).digest("hex").slice(0, 8);
   return `${safe.slice(0, MAX_TOOL_NAME - PREFIX.length - 9)}_${digest}`;
@@ -117,7 +117,7 @@ function normalizeSchema(parameters: Record<string, unknown> | undefined): {
   [k: string]: unknown;
 } {
   if (parameters && parameters.type === "object") return parameters as { type: "object" };
-  return { type: "object", properties: {}, ...(parameters ?? {}) } as { type: "object" };
+  return { type: "object", properties: {}, ...parameters };
 }
 
 function errorResult(message: string): CallToolResult {

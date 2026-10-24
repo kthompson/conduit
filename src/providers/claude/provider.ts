@@ -67,7 +67,7 @@ export class ClaudeProvider implements Provider {
       const learned = this.limits.get(id) ?? this.limits.get(info.value) ?? knownLimits(id);
       out.push({
         id,
-        ...(learned ?? {}),
+        ...learned,
         ownedBy: "anthropic",
         displayName: info.displayName,
         ...(info.supportsEffort && info.supportedEffortLevels
@@ -158,25 +158,26 @@ export class ClaudeProvider implements Provider {
 
   async close(): Promise<void> {
     clearInterval(this.reaper);
-    for (const s of [...this.sessions]) s.close("server shutting down");
+    for (const s of this.sessions) s.close("server shutting down");
   }
 
   private evictForNewSession(): void {
     if (this.sessions.size < this.config.maxSessions) return;
     const idle = [...this.sessions]
       .filter((s) => s.state !== "busy")
-      .sort((a, b) => a.lastUsed - b.lastUsed);
+      .toSorted((a, b) => a.lastUsed - b.lastUsed);
     const oldest = idle[0];
     if (oldest) oldest.close("evicted for a new session");
-    else
+    else {
       log.warn("all claude sessions are busy; exceeding max_sessions", {
         max: this.config.maxSessions,
       });
+    }
   }
 
   private reapIdle(): void {
     const cutoff = Date.now() - this.config.sessionIdleSeconds * 1000;
-    for (const s of [...this.sessions]) {
+    for (const s of this.sessions) {
       if (s.state !== "busy" && s.lastUsed < cutoff) s.close("idle timeout");
     }
   }
@@ -207,7 +208,7 @@ export function matchSession<S extends SessionLike>(
 ): Match<S> {
   const candidates = [...sessions]
     .filter((s) => s.key === key && (s.state === "idle" || s.state === "awaiting_tools"))
-    .sort((a, b) => b.lastUsed - a.lastUsed);
+    .toSorted((a, b) => b.lastUsed - a.lastUsed);
 
   for (const session of candidates) {
     const seen = session.transcript;
@@ -218,8 +219,9 @@ export function matchSession<S extends SessionLike>(
     if (session.state === "awaiting_tools") {
       const results: Array<{ id: string; content: ToolResultContent[] }> = [];
       let i = 0;
-      for (; i < rest.length && rest[i]!.role === "tool"; i++) {
-        const m = rest[i] as Extract<ChatMessage, { role: "tool" }>;
+      for (const m of rest) {
+        if (m.role !== "tool") break;
+        i++;
         results.push({ id: m.tool_call_id, content: toToolResultContent(m.content) });
       }
       if (results.length === 0) continue;
@@ -228,7 +230,7 @@ export function matchSession<S extends SessionLike>(
       if (!after.every(isUserLike)) continue;
       // Content the client adds after tool results rides along with the last result.
       const extra = after.flatMap(userLikeBlocks).map(blockToResult);
-      if (extra.length > 0) results.at(-1)!.content.push(...extra);
+      results.at(-1)?.content.push(...extra);
       return { kind: "tools", session, results };
     }
 
@@ -276,8 +278,9 @@ function userLikeBlocks(m: ChatMessage): UserBlock[] {
 
 function blockToResult(block: UserBlock): ToolResultContent {
   if (block.type === "text") return block;
-  if (block.source.type === "base64")
+  if (block.source.type === "base64") {
     return { type: "image", data: block.source.data, mimeType: block.source.media_type };
+  }
   return { type: "text", text: `[image: ${block.source.url}]` };
 }
 
@@ -287,7 +290,7 @@ function blockToResult(block: UserBlock): ToolResultContent {
  */
 export function coldStartBlocks(conversation: ChatMessage[]): UserBlock[] {
   let tail = conversation.length;
-  while (tail > 0 && isUserLike(conversation[tail - 1]!)) tail--;
+  while (tail > 0 && isUserLike(conversation.at(tail - 1) as ChatMessage)) tail--;
   const history = conversation.slice(0, tail);
   const latest = conversation.slice(tail);
 

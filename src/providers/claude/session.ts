@@ -285,8 +285,9 @@ export class ClaudeSession {
     }
     const turn = this.turn;
     if (!turn) {
-      if (result.is_error)
+      if (result.is_error) {
         log.warn("claude reported an error outside a turn", { session: this.id });
+      }
       return;
     }
     if (result.is_error || result.subtype !== "success") {

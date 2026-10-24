@@ -57,7 +57,7 @@ export interface Usage {
 export type FinishReason = "stop" | "length" | "tool_calls" | "content_filter";
 
 export function textOf(content: string | ContentPart[] | null | undefined): string {
-  if (content == null) return "";
+  if (content === null || content === undefined) return "";
   if (typeof content === "string") return content;
   return content
     .map((part) => (part.type === "text" && typeof part.text === "string" ? part.text : ""))
