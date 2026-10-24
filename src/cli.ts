@@ -103,10 +103,7 @@ async function main() {
 
 async function serve(config: Config) {
   const providers: Partial<Record<ProviderName, Provider>> = { mock: new MockProvider() };
-  if (
-    config.defaultProvider === "claude" ||
-    Object.values(config.models).some((m) => m.provider === "claude")
-  ) {
+  if (config.defaultProvider === "claude") {
     providers.claude = new ClaudeProvider(config.claude);
   }
   const server = await startServer(config, providers);

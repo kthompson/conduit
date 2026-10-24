@@ -5,7 +5,6 @@ import { Recorder, type Trace } from "./capture/recorder.ts";
 import { log } from "./log.ts";
 import { collectChat, streamChat } from "./openai/chat.ts";
 import { errorBody, HttpError, type ChatCompletionRequest } from "./openai/types.ts";
-import { knownLimits } from "./providers/claude/limits.ts";
 import type { ModelEntry, Provider } from "./providers/types.ts";
 
 const MAX_BODY_BYTES = 64 * 1024 * 1024;
@@ -31,14 +30,6 @@ export async function startServer(
   const recorder = new Recorder(config.capture.enabled ? config.capture.dir : undefined);
 
   const resolve = (model: string): Route => {
-    const explicit = config.models[model];
-    if (explicit) {
-      return {
-        provider: need(explicit.provider),
-        upstream: explicit.upstream ?? model,
-        effort: explicit.effort,
-      };
-    }
     const suffix = EFFORT_SUFFIX.exec(model);
     const base = suffix ? suffix[1]! : model;
     const effort = suffix ? suffix[2] : undefined;
@@ -214,13 +205,6 @@ async function listModels(config: Config, providers: Partial<Record<ProviderName
       ...(contextWindow ? { context_window: contextWindow, context_length: contextWindow } : {}),
     });
   };
-  for (const [id, route] of Object.entries(config.models)) {
-    const known = route.provider === "claude" ? knownLimits(route.upstream ?? id) : undefined;
-    add(id, route.provider, {
-      contextWindow: route.contextWindow ?? known?.contextWindow,
-      maxOutputTokens: known?.maxOutputTokens,
-    });
-  }
   for (const provider of Object.values(providers)) {
     if (!provider) continue;
     for (const m of await provider.listModels()) add(m.id, m.ownedBy, m);

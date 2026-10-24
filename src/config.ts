@@ -43,22 +43,11 @@ export interface ClaudeConfig {
   env: Record<string, string>;
 }
 
-export interface ModelRoute {
-  provider: ProviderName;
-  /** Model id passed to the provider; defaults to the exposed id. */
-  upstream: string | undefined;
-  effort: string | undefined;
-  /** Context window reported in /v1/models so clients size compaction correctly. */
-  contextWindow: number | undefined;
-}
-
 export interface Config {
   server: ServerConfig;
   capture: CaptureConfig;
   defaultProvider: ProviderName;
   claude: ClaudeConfig;
-  /** Explicit model routes keyed by the id clients send. */
-  models: Record<string, ModelRoute>;
   /** File the config was read from, if any. */
   source: string | undefined;
 }
@@ -92,7 +81,6 @@ export function defaultConfig(): Config {
       reasoning: "reasoning_content",
       env: {},
     },
-    models: {},
     source: undefined,
   };
 }
@@ -182,22 +170,6 @@ function applyToml(config: Config, raw: Record<string, unknown>, file: string): 
     const env = table(claude.env, where("providers.claude.env"));
     if (env) {
       for (const [k, v] of Object.entries(env)) c.env[k] = String(v);
-    }
-  }
-
-  const models = table(raw.models, where("models"));
-  if (models) {
-    for (const [id, value] of Object.entries(models)) {
-      const m = table(value, where(`models.${id}`)) ?? {};
-      config.models[id] = {
-        provider: providerName(
-          str(m.provider, where(`models.${id}.provider`)) ?? config.defaultProvider,
-          where(`models.${id}.provider`),
-        ),
-        upstream: nonEmpty(str(m.upstream, where(`models.${id}.upstream`))),
-        effort: nonEmpty(str(m.effort, where(`models.${id}.effort`))),
-        contextWindow: num(m.context_window, where(`models.${id}.context_window`)),
-      };
     }
   }
 }
