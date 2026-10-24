@@ -31,22 +31,30 @@ export function copilotEfforts(efforts: readonly string[] | undefined): string[]
 export const defaultCopilotDb = path.join(homedir(), ".copilot", "data.db");
 
 /** Max prompt tokens is what is left of the context window after reserving the output. */
-export function promptBudget(m: Pick<CopilotModel, "contextWindow" | "maxOutputTokens">): number | null {
+export function promptBudget(
+  m: Pick<CopilotModel, "contextWindow" | "maxOutputTokens">,
+): number | null {
   if (!m.contextWindow) return null;
   return Math.max(1, m.contextWindow - (m.maxOutputTokens ?? 0));
 }
 
 export function setupCopilot(opts: SetupOptions): string[] {
   const dbPath = opts.dbPath ?? defaultCopilotDb;
-  if (!existsSync(dbPath)) throw new Error(`Copilot Desktop database not found at ${dbPath}. Launch the app once first.`);
+  if (!existsSync(dbPath))
+    throw new Error(`Copilot Desktop database not found at ${dbPath}. Launch the app once first.`);
   const name = opts.providerName ?? "Conduit";
   const lines: string[] = [];
   const db = new DatabaseSync(dbPath, { readOnly: !opts.write });
   try {
-    const existing = db.prepare("SELECT id, settings_json FROM model_providers WHERE type = 'custom' AND name = ?").get(name) as
-      | { id: string; settings_json: string }
-      | undefined;
-    const settings = JSON.stringify({ baseUrl: opts.baseUrl, wireApi: "completions", authKind: "none", headersJson: "{}" });
+    const existing = db
+      .prepare("SELECT id, settings_json FROM model_providers WHERE type = 'custom' AND name = ?")
+      .get(name) as { id: string; settings_json: string } | undefined;
+    const settings = JSON.stringify({
+      baseUrl: opts.baseUrl,
+      wireApi: "completions",
+      authKind: "none",
+      headersJson: "{}",
+    });
     const providerId = existing?.id ?? randomUUID();
     lines.push(`${existing ? "update" : "create"} provider "${name}" -> ${opts.baseUrl}`);
 
@@ -57,13 +65,15 @@ export function setupCopilot(opts: SetupOptions): string[] {
       lines.push(`backup: ${backup}`);
       db.exec("BEGIN IMMEDIATE");
       if (existing) {
-        db.prepare("UPDATE model_providers SET settings_json = ?, updated_at = ? WHERE id = ?").run(settings, now(), providerId);
-      } else {
-        db.prepare("INSERT INTO model_providers (id, name, type, settings_json) VALUES (?, ?, 'custom', ?)").run(
-          providerId,
-          name,
+        db.prepare("UPDATE model_providers SET settings_json = ?, updated_at = ? WHERE id = ?").run(
           settings,
+          now(),
+          providerId,
         );
+      } else {
+        db.prepare(
+          "INSERT INTO model_providers (id, name, type, settings_json) VALUES (?, ?, 'custom', ?)",
+        ).run(providerId, name, settings);
       }
     }
     for (const m of opts.models) {
@@ -82,7 +92,16 @@ export function setupCopilot(opts: SetupOptions): string[] {
            max_output_tokens = excluded.max_output_tokens,
            supported_reasoning_efforts = COALESCE(excluded.supported_reasoning_efforts, supported_reasoning_efforts),
            updated_at = ?`,
-      ).run(randomUUID(), providerId, m.id, m.displayName ?? m.id, prompt, m.maxOutputTokens ?? null, efforts, now());
+      ).run(
+        randomUUID(),
+        providerId,
+        m.id,
+        m.displayName ?? m.id,
+        prompt,
+        m.maxOutputTokens ?? null,
+        efforts,
+        now(),
+      );
     }
     if (opts.write) db.exec("COMMIT");
   } catch (error) {
@@ -97,7 +116,11 @@ export function setupCopilot(opts: SetupOptions): string[] {
   } finally {
     db.close();
   }
-  lines.push(opts.write ? "written. Restart Copilot Desktop to pick up the changes." : "dry run; re-run with --write to apply.");
+  lines.push(
+    opts.write
+      ? "written. Restart Copilot Desktop to pick up the changes."
+      : "dry run; re-run with --write to apply.",
+  );
   return lines;
 }
 

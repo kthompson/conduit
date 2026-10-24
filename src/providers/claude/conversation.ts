@@ -1,14 +1,17 @@
 import { createHash } from "node:crypto";
-import { textOf, type ChatMessage, type ContentPart, type FunctionTool } from "../../openai/types.ts";
+import {
+  textOf,
+  type ChatMessage,
+  type ContentPart,
+  type FunctionTool,
+} from "../../openai/types.ts";
 
 // Anthropic content blocks conduit sends to Claude Code.
 export type UserBlock =
   | { type: "text"; text: string }
   | {
       type: "image";
-      source:
-        | { type: "base64"; media_type: string; data: string }
-        | { type: "url"; url: string };
+      source: { type: "base64"; media_type: string; data: string } | { type: "url"; url: string };
     };
 
 // MCP tool result content returned to Claude Code.
@@ -24,10 +27,16 @@ const normalize = (text: string) => text.replace(/\s+/g, " ").trim();
  * and the conversation. A system message after the first turn stays in the
  * conversation and is shown to Claude as user content.
  */
-export function splitSystem(messages: ChatMessage[]): { system: string; conversation: ChatMessage[] } {
+export function splitSystem(messages: ChatMessage[]): {
+  system: string;
+  conversation: ChatMessage[];
+} {
   let i = 0;
   const parts: string[] = [];
-  while (i < messages.length && (messages[i]!.role === "system" || messages[i]!.role === "developer")) {
+  while (
+    i < messages.length &&
+    (messages[i]!.role === "system" || messages[i]!.role === "developer")
+  ) {
     parts.push(textOf(messages[i]!.content));
     i++;
   }
@@ -68,7 +77,11 @@ export function sessionKey(input: {
   model: string;
   effort: string | undefined;
 }): string {
-  const tools = (input.tools ?? []).map((t) => [t.function.name, t.function.description ?? "", t.function.parameters ?? {}]);
+  const tools = (input.tools ?? []).map((t) => [
+    t.function.name,
+    t.function.description ?? "",
+    t.function.parameters ?? {},
+  ]);
   return hash(JSON.stringify([input.system, tools, input.model, input.effort ?? ""]));
 }
 
@@ -78,7 +91,8 @@ function countImages(content: string | ContentPart[] | null | undefined): number
 
 export function toUserBlocks(content: string | ContentPart[] | null | undefined): UserBlock[] {
   if (content == null) return [];
-  if (typeof content === "string") return content.length === 0 ? [] : [{ type: "text", text: content }];
+  if (typeof content === "string")
+    return content.length === 0 ? [] : [{ type: "text", text: content }];
   const blocks: UserBlock[] = [];
   for (const part of content) {
     if (part.type === "text" && typeof part.text === "string") {
@@ -96,7 +110,8 @@ export function toUserBlocks(content: string | ContentPart[] | null | undefined)
 
 function imageFromUrl(url: string): UserBlock | undefined {
   const data = /^data:([^;,]+);base64,(.*)$/s.exec(url);
-  if (data) return { type: "image", source: { type: "base64", media_type: data[1]!, data: data[2]! } };
+  if (data)
+    return { type: "image", source: { type: "base64", media_type: data[1]!, data: data[2]! } };
   if (/^https?:\/\//.test(url)) return { type: "image", source: { type: "url", url } };
   return undefined;
 }
@@ -119,7 +134,10 @@ export function toToolResultContent(content: string | ContentPart[]): ToolResult
  * Renders history Claude did not see live as a transcript, for a session that
  * starts mid-conversation (after a restart, a model switch, or edited history).
  */
-export function renderTranscript(messages: ChatMessage[], toolName: (name: string) => string = (n) => n): string {
+export function renderTranscript(
+  messages: ChatMessage[],
+  toolName: (name: string) => string = (n) => n,
+): string {
   const lines: string[] = [];
   for (const m of messages) {
     switch (m.role) {
@@ -134,7 +152,9 @@ export function renderTranscript(messages: ChatMessage[], toolName: (name: strin
         const text = textOf(m.content);
         if (text.length > 0) lines.push(`[assistant]\n${text}`);
         for (const call of m.tool_calls ?? []) {
-          lines.push(`[assistant tool call ${call.id}] ${toolName(call.function.name)} ${call.function.arguments}`);
+          lines.push(
+            `[assistant tool call ${call.id}] ${toolName(call.function.name)} ${call.function.arguments}`,
+          );
         }
         break;
       }
@@ -149,7 +169,13 @@ export function renderTranscript(messages: ChatMessage[], toolName: (name: strin
 function renderWithImages(content: string | ContentPart[] | null | undefined): string {
   if (!Array.isArray(content)) return textOf(content);
   return content
-    .map((p) => (p.type === "text" && typeof p.text === "string" ? p.text : p.type === "image_url" ? "[image]" : ""))
+    .map((p) =>
+      p.type === "text" && typeof p.text === "string"
+        ? p.text
+        : p.type === "image_url"
+          ? "[image]"
+          : "",
+    )
     .join("");
 }
 

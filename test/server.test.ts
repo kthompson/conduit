@@ -29,7 +29,9 @@ const post = (body: unknown, key = "secret") =>
     body: JSON.stringify(body),
   });
 
-const tools = [{ type: "function", function: { name: "get_weather", parameters: { type: "object" } } }];
+const tools = [
+  { type: "function", function: { name: "get_weather", parameters: { type: "object" } } },
+];
 
 test("rejects a wrong API key", async () => {
   const res = await post({ model: "mock", messages: [{ role: "user", content: "hi" }] }, "nope");
@@ -37,14 +39,21 @@ test("rejects a wrong API key", async () => {
 });
 
 test("lists models", async () => {
-  const res = await fetch(`${server.url}/v1/models`, { headers: { authorization: "Bearer secret" } });
+  const res = await fetch(`${server.url}/v1/models`, {
+    headers: { authorization: "Bearer secret" },
+  });
   const body = (await res.json()) as { data: Array<{ id: string }> };
-  assert.deepEqual(body.data.map((m) => m.id), ["mock"]);
+  assert.deepEqual(
+    body.data.map((m) => m.id),
+    ["mock"],
+  );
 });
 
 test("non-streaming completion describes the request", async () => {
   const res = await post({ model: "mock", messages: [{ role: "user", content: "hi" }] });
-  const body = (await res.json()) as { choices: Array<{ message: { content: string }; finish_reason: string }> };
+  const body = (await res.json()) as {
+    choices: Array<{ message: { content: string }; finish_reason: string }>;
+  };
   assert.equal(res.status, 200);
   assert.match(body.choices[0]!.message.content, /conduit mock/);
   assert.equal(body.choices[0]!.finish_reason, "stop");
@@ -65,13 +74,20 @@ test("streams a simulated tool call in OpenAI chunk format", async () => {
   assert.ok(text.trimEnd().endsWith("data: [DONE]"));
   const toolDeltas = chunks.flatMap((c) => c.choices[0]?.delta.tool_calls ?? []);
   assert.equal(toolDeltas[0].function.name, "get_weather");
-  assert.equal(toolDeltas.map((d: { function: { arguments: string } }) => d.function.arguments).join(""), '{"city":"Paris"}');
+  assert.equal(
+    toolDeltas.map((d: { function: { arguments: string } }) => d.function.arguments).join(""),
+    '{"city":"Paris"}',
+  );
   assert.equal(chunks.at(-1).choices[0].finish_reason, "tool_calls");
 });
 
 test("validates the body and 404s unknown routes", async () => {
   assert.equal((await post({ model: "mock", messages: [] })).status, 400);
-  const res = await fetch(`${server.url}/v1/responses`, { method: "POST", headers: { authorization: "Bearer secret" }, body: "{}" });
+  const res = await fetch(`${server.url}/v1/responses`, {
+    method: "POST",
+    headers: { authorization: "Bearer secret" },
+    body: "{}",
+  });
   assert.equal(res.status, 404);
 });
 

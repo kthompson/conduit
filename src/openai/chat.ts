@@ -19,7 +19,11 @@ function envelope(model: string): Envelope {
  * Rewrites reasoning events for clients that do not read `reasoning_content`.
  * `think_tags` folds thinking into content as `<think>…</think>`.
  */
-function* shapeReasoning(mode: ReasoningOutput, state: { open: boolean }, event: TurnEvent): Generator<TurnEvent> {
+function* shapeReasoning(
+  mode: ReasoningOutput,
+  state: { open: boolean },
+  event: TurnEvent,
+): Generator<TurnEvent> {
   if (event.type === "reasoning") {
     if (mode === "none") return;
     if (mode === "reasoning_content") return yield event;
@@ -77,7 +81,12 @@ export async function streamChat(
           case "tool_call_start":
             chunk({
               tool_calls: [
-                { index: event.index, id: event.id, type: "function", function: { name: event.name, arguments: "" } },
+                {
+                  index: event.index,
+                  id: event.id,
+                  type: "function",
+                  function: { name: event.name, arguments: "" },
+                },
               ],
             });
             break;
@@ -92,7 +101,9 @@ export async function streamChat(
             break;
           case "error":
             status = 502;
-            send({ error: { message: event.message, type: "upstream_error", code: "upstream_error" } });
+            send({
+              error: { message: event.message, type: "upstream_error", code: "upstream_error" },
+            });
             break;
         }
       }
@@ -134,7 +145,11 @@ export async function collectChat(
           reasoning += event.delta;
           break;
         case "tool_call_start":
-          toolCalls[event.index] = { id: event.id, type: "function", function: { name: event.name, arguments: "" } };
+          toolCalls[event.index] = {
+            id: event.id,
+            type: "function",
+            function: { name: event.name, arguments: "" },
+          };
           break;
         case "tool_call_args": {
           const call = toolCalls[event.index];
@@ -146,12 +161,20 @@ export async function collectChat(
           usage = event.usage;
           break;
         case "error":
-          return { status: 502, body: { error: { message: event.message, type: "upstream_error", code: "upstream_error" } } };
+          return {
+            status: 502,
+            body: {
+              error: { message: event.message, type: "upstream_error", code: "upstream_error" },
+            },
+          };
       }
     }
   }
 
-  const message: Record<string, unknown> = { role: "assistant", content: content.length > 0 ? content : null };
+  const message: Record<string, unknown> = {
+    role: "assistant",
+    content: content.length > 0 ? content : null,
+  };
   if (reasoning.length > 0) message.reasoning_content = reasoning;
   if (toolCalls.length > 0) message.tool_calls = toolCalls.filter(Boolean);
   return {
