@@ -1,0 +1,53 @@
+# conduit configuration.
+# Looked up in order: --config, $CONDUIT_CONFIG, ./conduit.toml, ~/.config/conduit/config.toml
+
+# Provider for models not listed under [models]: "claude" or "mock".
+default_provider = "claude"
+
+[server]
+host = "127.0.0.1"
+port = 4100
+# When set, clients must send `Authorization: Bearer <api_key>`. Set it before binding beyond localhost.
+# api_key = "change-me"
+
+[capture]
+# Record every HTTP exchange (and Claude's raw SDK events) as JSON files.
+enabled = false
+# dir = "~/.local/state/conduit/captures"
+
+[providers.claude]
+# Claude Code binary. Unset uses the one bundled with the Agent SDK.
+# binary = "~/.local/bin/claude"
+# Working directory for the Claude Code process.
+# cwd = "~"
+# Claude Code settings layers to load. Empty keeps the model isolated from
+# your CLAUDE.md, hooks, plugins and MCP servers. Options: "user", "project", "local".
+setting_sources = []
+# Remove ANTHROPIC_API_KEY from Claude Code's env so it uses your subscription login.
+strip_api_key = true
+# Close a conversation's Claude Code process after this long without use.
+session_idle_seconds = 900
+# Most Claude Code processes kept alive at once.
+max_sessions = 8
+# How long Claude waits for the client to run a tool and send back the result.
+tool_timeout_seconds = 3600
+# Default effort when the request has no reasoning_effort: low, medium, high, xhigh, max.
+# effort = "high"
+# Context window (tokens) reported in /v1/models; clients use it to decide when to compact.
+# Raise it (e.g. 1000000) for long-context models.
+# context_window = 200000
+# How thinking is returned: "reasoning_content" (delta field), "think_tags" (<think> in content), or "none".
+reasoning = "reasoning_content"
+
+# Extra environment for Claude Code.
+# [providers.claude.env]
+# CLAUDE_CODE_MAX_OUTPUT_TOKENS = "32000"
+
+# Extra model ids. Any id your Claude login accepts works without an entry
+# (claude-opus-5-5, sonnet, haiku, ...), and `<model>:<effort>` selects effort,
+# e.g. `claude-opus-5-5:high`.
+# [models."opus-max"]
+# provider = "claude"
+# upstream = "claude-opus-5-5"
+# effort = "max"
+# context_window = 1000000
