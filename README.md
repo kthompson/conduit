@@ -78,8 +78,8 @@ Captures go to `~/.local/state/conduit/captures/<timestamp>/` by default.
 - `/v1/models` lists what your login offers, asked live from Claude Code.
 - Any id Claude Code accepts works: full ids (`claude-opus-5-5`) or aliases (`opus`, `sonnet`, `haiku`).
 - Effort comes from `reasoning_effort` on the request, a `:effort` suffix on the model
-  (`claude-opus-5-5:high`, handy when the harness only lets you set a model name), a
-  `[models]` entry, or `providers.claude.effort`.
+  (`claude-opus-5-5:high`, handy when the harness only lets you set a model name), or
+  `providers.claude.effort`.
 - Thinking streams as `reasoning_content` by default. Set `reasoning = "think_tags"` or `"none"` to change that.
 
 ## How conversations map onto Claude Code
@@ -143,4 +143,4 @@ conduit setup copilot            # dry run: prints what would change
 conduit setup copilot --write    # backs up ~/.copilot/data.db, then upserts a "Conduit" provider and its models
 ```
 
-Setup probes each model with one tiny turn to read its real context window and output cap (`--no-probe` skips this and uses built-in defaults). Each model's supported reasoning efforts (`low`, `medium`, `high`, `xhigh`, `max`, as reported by Claude Code) are written too, as a JSON array in `supported_reasoning_efforts`; pass `--no-efforts` to leave that column alone. A model with no efforts keeps whatever you set in Copilot's form. Quit Copilot Desktop before `--write`, and restart it afterwards. Context windows and output limits come from, in order: `context_window` in a `[models]` entry, limits the running server learned from real turns on your login, then a built-in table of values measured through Claude Code (`src/providers/claude/limits.ts`). Claude Code's limits can differ from the API docs and from plan to plan, for example Opus 4.6 and Sonnet 4.6 stay at 200K without a `[1m]` suffix, so running `setup copilot` while `conduit serve` is up (and has served a turn) gives the most accurate numbers. Restart `conduit serve` after upgrading so it picks up new defaults.
+Setup probes each model with one tiny turn to read its real context window and output cap (`--no-probe` skips this and uses built-in defaults). Each model's supported reasoning efforts (`low`, `medium`, `high`, `xhigh`, `max`, as reported by Claude Code) are written too, as a JSON array in `supported_reasoning_efforts`; pass `--no-efforts` to leave that column alone. A model with no efforts keeps whatever you set in Copilot's form. Quit Copilot Desktop before `--write`, and restart it afterwards. Context windows and output limits come from, in order: limits the running server learned from real turns on your login, then a built-in table of values measured through Claude Code (`src/providers/claude/limits.ts`). Claude Code's limits can differ from the API docs and from plan to plan, for example Opus 4.6 and Sonnet 4.6 stay at 200K without a `[1m]` suffix, so running `setup copilot` while `conduit serve` is up (and has served a turn) gives the most accurate numbers. Restart `conduit serve` after upgrading so it picks up new defaults.
