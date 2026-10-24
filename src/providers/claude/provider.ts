@@ -6,12 +6,10 @@ import { textOf, type ChatMessage } from "../../openai/types.ts";
 import type { ModelEntry, Provider, TurnEvent, TurnInput } from "../types.ts";
 import {
   fingerprint,
-  renderTranscript,
   sessionKey,
   splitSystem,
   toToolResultContent,
   toUserBlocks,
-  TRANSCRIPT_PREAMBLE,
   type ToolResultContent,
   type UserBlock,
 } from "./conversation.ts";
@@ -127,6 +125,7 @@ export class ClaudeProvider implements Provider {
       );
     } else {
       this.evictForNewSession();
+      const { history, blocks } = coldStart(conversation);
       const session = new ClaudeSession(
         {
           key,
@@ -134,13 +133,13 @@ export class ClaudeProvider implements Provider {
           effort: input.effort,
           system,
           tools,
+          history,
           config: this.config,
           onLimits: (m, l) => this.recordLimits(m, l),
         },
         (s) => this.sessions.delete(s),
       );
       this.sessions.add(session);
-      const blocks = coldStartBlocks(conversation);
       input.trace.note("started new claude session", {
         session: session.id,
         historyMessages: conversation.length,
@@ -285,31 +284,18 @@ function blockToResult(block: UserBlock): ToolResultContent {
 }
 
 /**
- * The first message of a new session: earlier history as a transcript,
- * followed by the trailing user message(s) as real content.
+ * Splits a new session's request into the history to resume as real turns and
+ * the trailing user message(s) that start the first turn.
  */
-export function coldStartBlocks(conversation: ChatMessage[]): UserBlock[] {
+export function coldStart(conversation: ChatMessage[]): {
+  history: ChatMessage[];
+  blocks: UserBlock[];
+} {
   let tail = conversation.length;
   while (tail > 0 && isUserLike(conversation.at(tail - 1) as ChatMessage)) tail--;
   const history = conversation.slice(0, tail);
   const latest = conversation.slice(tail);
-
-  const blocks: UserBlock[] = [];
-  if (history.length > 0) {
-    blocks.push({
-      type: "text",
-      text: `${TRANSCRIPT_PREAMBLE}\n\n<transcript>\n${renderTranscript(history)}\n</transcript>`,
-    });
-  }
-  if (latest.length > 0) {
-    blocks.push(...latest.flatMap(userLikeBlocks));
-  } else if (history.at(-1)?.role === "tool") {
-    blocks.push({
-      type: "text",
-      text: "The latest tool results are at the end of the transcript. Continue.",
-    });
-  } else {
-    blocks.push({ type: "text", text: "Continue." });
-  }
-  return blocks;
+  const blocks = latest.flatMap(userLikeBlocks);
+  if (blocks.length === 0) blocks.push({ type: "text", text: "Continue." });
+  return { history, blocks };
 }
