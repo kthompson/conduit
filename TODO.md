@@ -6,6 +6,7 @@
 - [ ] `post_turn_summary`: Claude Code runs an internal step after each turn that delays a
       follow-up arriving within ~2s; find a way to turn it off
 - [ ] Map subscription rate-limit errors to HTTP 429 (non-streaming) and a clearer stream error
+- [ ] Web UI: usage history over time, per-provider model restrictions, Codex and Copilot provider types
 - [ ] Build step for publishing (`node` won't strip types inside node_modules)
 - [ ] More providers (Codex, Grok) behind the same `Provider` interface
 - [ ] Only if a client needs it: `/v1/responses` front end (Copilot's `wireApi: "responses"`)

@@ -3,3 +3,5 @@ dist/
 captures/
 reference/
 conduit.toml
+ui/build/
+ui/.react-router/

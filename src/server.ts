@@ -10,6 +10,13 @@ import type { ModelEntry, Provider } from "./providers/types.ts";
 const MAX_BODY_BYTES = 64 * 1024 * 1024;
 const EFFORT_SUFFIX = /^(.+?)[:@](low|medium|high|xhigh|max)$/;
 
+/** The web UI, mounted under /ui. */
+export interface UiMount {
+  owns(url: string | undefined): boolean;
+  handle(req: IncomingMessage, res: ServerResponse): void;
+  close(): Promise<void>;
+}
+
 export interface ConduitServer {
   server: Server;
   url: string;
@@ -26,6 +33,7 @@ interface Route {
 export async function startServer(
   config: Config,
   providers: Partial<Record<ProviderName, Provider>>,
+  ui?: UiMount,
 ): Promise<ConduitServer> {
   const recorder = new Recorder(config.capture.enabled ? config.capture.dir : undefined);
 
@@ -50,6 +58,8 @@ export async function startServer(
   };
 
   const handle = async (req: IncomingMessage, res: ServerResponse) => {
+    // The UI reads its own request body and has its own session handling.
+    if (ui?.owns(req.url)) return ui.handle(req, res);
     const url = new URL(req.url ?? "/", "http://conduit");
     let body: unknown;
     let bodyError: Error | undefined;
@@ -116,7 +126,7 @@ export async function startServer(
     url: `http://${host}:${address.port}`,
     recorder,
     close: async () => {
-      await Promise.all(Object.values(providers).map((p) => p?.close()));
+      await Promise.all([...Object.values(providers).map((p) => p?.close()), ui?.close()]);
       server.closeAllConnections();
       await new Promise<void>((ok) => server.close(() => ok()));
     },

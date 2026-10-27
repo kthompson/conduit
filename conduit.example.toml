@@ -10,6 +10,15 @@ port = 4100
 # When set, clients must send `Authorization: Bearer <api_key>`. Set it before binding beyond localhost.
 # api_key = "change-me"
 
+[ui]
+# Web UI at http://127.0.0.1:4100/ui/ : list providers, see usage, add logins, set priority.
+# Needs `pnpm build:ui` once (or start with `conduit serve --ui-dev`).
+enabled = true
+# Extra Host names the UI answers to (localhost and server.host always work). Guards against DNS rebinding.
+# allowed_hosts = ["conduit.example.com"]
+# Send the Content-Security-Policy as report-only while debugging.
+# csp_report_only = false
+
 [capture]
 # Record every HTTP exchange (and Claude's raw SDK events) as JSON files.
 enabled = false
