@@ -9,10 +9,9 @@ import {
   type ProviderName,
 } from "./config.ts";
 import { log, setLogLevel } from "./log.ts";
-import { ClaudeProvider, openProbe } from "./providers/claude/provider.ts";
-import { MockProvider } from "./providers/mock/provider.ts";
-import type { Provider } from "./providers/types.ts";
-import { startServer } from "./server.ts";
+import { ClaudeProvider } from "./providers/claude/provider.ts";
+import { openProbe } from "./providers/claude/probe.ts";
+import { serve } from "./serve.ts";
 import { defaultCopilotDb, setupCopilot, type CopilotModel } from "./setup-copilot.ts";
 
 const HELP = `conduit — an OpenAI-compatible endpoint for agent subscriptions
@@ -32,6 +31,8 @@ Options:
   -H, --host <addr>        Address to bind
       --provider <name>    Default provider: claude or mock (capture defaults to mock)
       --capture [dir]      Record requests, responses and upstream events as JSON
+      --ui-dev             Serve the web UI from the Vite dev server (HMR, DevTools)
+      --no-ui              Do not serve the web UI
   -v, --verbose            Debug logging
   -h, --help               Show this help
 `;
@@ -45,6 +46,8 @@ async function main() {
       host: { type: "string", short: "H" },
       provider: { type: "string" },
       capture: { type: "string" },
+      "ui-dev": { type: "boolean" },
+      "no-ui": { type: "boolean" },
       verbose: { type: "boolean", short: "v" },
       help: { type: "boolean", short: "h" },
       write: { type: "boolean" },
@@ -70,6 +73,8 @@ async function main() {
   if (values.port) config.server.port = Number(values.port);
   if (values.host) config.server.host = values.host;
   if (values.provider) config.defaultProvider = values.provider as ProviderName;
+  if (values["ui-dev"]) config.ui.dev = true;
+  if (values["no-ui"]) config.ui.enabled = false;
   if (values.capture !== undefined) {
     config.capture.enabled = true;
     if (values.capture.length > 0) config.capture.dir = path.resolve(expandHome(values.capture));
@@ -97,40 +102,6 @@ async function main() {
       process.stderr.write(`Unknown command "${command}".\n\n${HELP}`);
       process.exitCode = 2;
   }
-}
-
-async function serve(config: Config) {
-  const providers: Partial<Record<ProviderName, Provider>> = { mock: new MockProvider() };
-  if (config.defaultProvider === "claude") {
-    providers.claude = new ClaudeProvider(config.claude);
-  }
-  const server = await startServer(config, providers);
-
-  log.info(`conduit listening on ${server.url}/v1`, {
-    provider: config.defaultProvider,
-    config: config.source ?? "(defaults)",
-  });
-  if (server.recorder.dir) log.info(`capturing to ${server.recorder.dir}`);
-  if (
-    config.server.host !== "127.0.0.1" &&
-    config.server.host !== "localhost" &&
-    !config.server.apiKey
-  ) {
-    log.warn(
-      "listening beyond localhost without server.api_key; anyone who can reach this port can use your subscription",
-    );
-  }
-
-  let stopping = false;
-  const stop = async () => {
-    if (stopping) return process.exit(1);
-    stopping = true;
-    log.info("shutting down");
-    await server.close();
-    process.exit(0);
-  };
-  process.on("SIGINT", () => void stop());
-  process.on("SIGTERM", () => void stop());
 }
 
 async function setup(

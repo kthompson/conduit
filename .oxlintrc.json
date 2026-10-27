@@ -96,7 +96,18 @@
         "typescript/no-unsafe-return": "off",
         "typescript/no-unsafe-type-assertion": "off"
       }
+    },
+    {
+      "files": ["src/providers/claude/provider.ts"],
+      "rules": { "import/max-dependencies": "off" }
+    },
+    {
+      "files": ["ui/**"],
+      "rules": {
+        "typescript/only-throw-error": "off",
+        "import/max-dependencies": "off"
+      }
     }
   ],
-  "ignorePatterns": ["node_modules"]
+  "ignorePatterns": ["node_modules", "ui/build", "ui/.react-router"]
 }

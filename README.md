@@ -97,6 +97,31 @@ Agent SDK messages under `upstream`.
 
 Captures go to `~/.local/state/conduit/captures/<timestamp>/` by default.
 
+## Providers and the web UI
+
+A **provider** is one Claude Code login. conduit can hold several and tries them in the
+priority order you set: a new conversation goes to the first enabled provider that is not
+rate limited or logged out. If a provider fails that way before answering, conduit marks it
+(for the length of the limit, when Claude says) and retries on the next. A conversation
+stays on the provider it started on. Your existing login is always there as "Default login".
+
+```bash
+pnpm build:ui                 # once; or run `conduit serve --ui-dev` for hot reload
+node src/cli.ts serve         # UI at http://127.0.0.1:4100/ui/
+```
+
+The UI lists each provider with its account, plan usage (5-hour and weekly windows, resets,
+extra usage), and this session's request and token counts. You can reorder, enable or
+disable, verify and remove providers, and add more. Adding one takes a name and a config
+directory (default `~/.config/conduit/accounts/<name>`); conduit creates it and shows the
+`CLAUDE_CONFIG_DIR=… claude /login` command to run, then **Verify login** checks it.
+Providers are stored in `~/.local/state/conduit/providers.json`.
+
+With `server.api_key` set, the UI asks for it once and keeps a signed `HttpOnly` cookie.
+Requests whose `Host` is not localhost or `server.host` (or `ui.allowed_hosts`) are refused.
+`--no-ui` or `ui.enabled = false` turns the UI off. It defaults to dark; the toggle in the
+header switches to light or system.
+
 ## Models and effort
 
 - `/v1/models` lists what your login offers, asked live from Claude Code.
@@ -148,6 +173,8 @@ Layout:
 - `src/providers/claude/`: sessions (`session.ts`), tool bridge (`toolBridge.ts`), and request matching plus cold start (`provider.ts`, `conversation.ts`)
 - `src/providers/mock/`: the capture-mode model
 - `src/capture/`: the JSON recorder
+- `src/providers/`: provider entries (`store.ts`), priority routing and usage (`registry.ts`), Claude usage lookup (`claude/usage.ts`)
+- `ui/`: the web UI (React Router, Tailwind, shadcn/ui, Conform + Zod), mounted by `src/ui.ts`
 
 The Claude integration follows patterns from t3code's Claude adapter (`reference/t3code`):
 how it drives the Agent SDK's `query()` with streaming input, isolates settings, and handles

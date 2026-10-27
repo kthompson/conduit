@@ -8,7 +8,14 @@ export type TurnEvent =
   | { type: "tool_call_start"; index: number; id: string; name: string }
   | { type: "tool_call_args"; index: number; delta: string }
   | { type: "done"; finishReason: FinishReason; usage: Usage | undefined }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string; failure?: TurnFailure };
+
+/** Why a turn failed, when the cause means this provider (not the request) is the problem. */
+export interface TurnFailure {
+  kind: "rate_limit" | "auth";
+  /** Unix milliseconds when a rate limit lifts, if Claude Code said. */
+  resetsAt?: number;
+}
 
 export interface TurnInput {
   request: ChatCompletionRequest;

@@ -1,8 +1,9 @@
-import { query, type ModelInfo } from "@anthropic-ai/claude-agent-sdk";
+import type { ModelInfo } from "@anthropic-ai/claude-agent-sdk";
 import type { ClaudeConfig } from "../../config.ts";
 import { Trace, type TraceRecord } from "../../capture/recorder.ts";
 import { log } from "../../log.ts";
 import { textOf, type ChatMessage } from "../../openai/types.ts";
+import type { ProviderRegistry } from "../registry.ts";
 import type { ModelEntry, Provider, TurnEvent, TurnInput } from "../types.ts";
 import {
   fingerprint,
@@ -14,6 +15,7 @@ import {
   type UserBlock,
 } from "./conversation.ts";
 import { knownLimits } from "./limits.ts";
+import { probeModels } from "./probe.ts";
 import { ClaudeSession } from "./session.ts";
 
 const MODEL_CACHE_MS = 10 * 60 * 1000;
@@ -36,13 +38,16 @@ export type Match<S> =
 export class ClaudeProvider implements Provider {
   readonly name = "claude";
   private readonly config: ClaudeConfig;
+  private readonly registry: ProviderRegistry | undefined;
   private readonly sessions = new Set<ClaudeSession>();
   private readonly reaper: NodeJS.Timeout;
   private readonly limits = new Map<string, { contextWindow: number; maxOutputTokens: number }>();
   private models: { at: number; list: ModelInfo[] } | undefined;
 
-  constructor(config: ClaudeConfig) {
+  /** With a registry, new conversations are routed across its providers by priority. */
+  constructor(config: ClaudeConfig, registry?: ProviderRegistry) {
     this.config = config;
+    this.registry = registry;
     this.reaper = setInterval(() => this.reapIdle(), 30_000);
     this.reaper.unref();
   }
@@ -97,67 +102,142 @@ export class ClaudeProvider implements Provider {
   }
 
   async *turn(input: TurnInput): AsyncIterable<TurnEvent> {
+    const failed = new Set<string>();
+    for (;;) {
+      let started: ReturnType<ClaudeProvider["startTurn"]>;
+      try {
+        started = this.startTurn(input, failed);
+      } catch (error) {
+        yield { type: "error", message: error instanceof Error ? error.message : String(error) };
+        return;
+      }
+      const { providerId, events } = started;
+      const iterator = events[Symbol.asyncIterator]();
+      let current = await iterator.next();
+      const first = current.done ? undefined : current.value;
+      if (first?.type === "error" && first.failure && this.registry) {
+        // Nothing has reached the client yet, so another provider can take over.
+        const { kind, resetsAt } = first.failure;
+        this.registry.markFailed(providerId, kind, first.message, resetsAt);
+        failed.add(providerId);
+        if (this.registry.pick(failed)) {
+          log.info("retrying on the next provider", { failed: providerId, reason: kind });
+          continue;
+        }
+      }
+      while (!current.done) {
+        if (current.value.type === "done") this.recordUsage(providerId, current.value);
+        yield current.value;
+        current = await iterator.next();
+      }
+      return;
+    }
+  }
+
+  private recordUsage(providerId: string, done: Extract<TurnEvent, { type: "done" }>): void {
+    const u = done.usage;
+    this.registry?.recordTurn(
+      providerId,
+      u
+        ? {
+            prompt: u.prompt_tokens,
+            completion: u.completion_tokens,
+            cached: u.prompt_tokens_details?.cached_tokens ?? 0,
+          }
+        : undefined,
+    );
+  }
+
+  /**
+   * Finds or starts the session for a request. Matching and starting happen with
+   * no await in between, so two concurrent requests can never claim the same session.
+   */
+  private startTurn(
+    input: TurnInput,
+    failed: ReadonlySet<string>,
+  ): { providerId: string; events: AsyncIterable<TurnEvent> } {
     const { request } = input;
     const { system, conversation } = splitSystem(request.messages);
     const tools = (request.tools ?? []).filter((t) => t.type === "function");
     const key = sessionKey({ system, tools, model: input.upstreamModel, effort: input.effort });
     const prints = conversation.map(fingerprint);
 
-    // Matching and starting the turn happen with no await in between, so two
-    // concurrent requests can never claim the same session.
-    const match = matchSession(this.sessions, key, conversation, prints);
-    let events: AsyncIterable<TurnEvent>;
+    const usable = [...this.sessions].filter(
+      (s) => !failed.has(s.providerId) && this.registry?.store.get(s.providerId)?.enabled !== false,
+    );
+    const match = matchSession(usable, key, conversation, prints);
     if (match.kind === "tools") {
       input.trace.note("matched live session awaiting tool results", { session: match.session.id });
-      events = match.session.sendToolResults(
-        match.results,
-        prints.slice(match.session.transcript.length),
-        input.trace,
-        input.signal,
-      );
-    } else if (match.kind === "user") {
-      input.trace.note("matched idle live session", { session: match.session.id });
-      events = match.session.sendUser(
-        match.blocks,
-        prints.slice(match.session.transcript.length),
-        input.trace,
-        input.signal,
-      );
-    } else {
-      this.evictForNewSession();
-      const { history, blocks } = coldStart(conversation);
-      const session = new ClaudeSession(
-        {
-          key,
-          model: input.upstreamModel,
-          effort: input.effort,
-          system,
-          tools,
-          history,
-          config: this.config,
-          onLimits: (m, l) => this.recordLimits(m, l),
-        },
-        (s) => this.sessions.delete(s),
-      );
-      this.sessions.add(session);
-      input.trace.note("started new claude session", {
-        session: session.id,
-        historyMessages: conversation.length,
-        liveSessions: this.sessions.size,
-      });
-      log.info("new claude session", {
-        session: session.id,
-        model: input.upstreamModel,
-        history: conversation.length,
-      });
-      events = session.sendUser(blocks, prints, input.trace, input.signal);
+      return {
+        providerId: match.session.providerId,
+        events: match.session.sendToolResults(
+          match.results,
+          prints.slice(match.session.transcript.length),
+          input.trace,
+          input.signal,
+        ),
+      };
     }
-    yield* events;
+    if (match.kind === "user") {
+      input.trace.note("matched idle live session", { session: match.session.id });
+      return {
+        providerId: match.session.providerId,
+        events: match.session.sendUser(
+          match.blocks,
+          prints.slice(match.session.transcript.length),
+          input.trace,
+          input.signal,
+        ),
+      };
+    }
+
+    const chosen = this.registry ? this.registry.pick(failed) : undefined;
+    if (this.registry && !chosen) {
+      throw new Error("No provider is available: every provider is disabled or logged out.");
+    }
+    const providerId = chosen?.id ?? "default";
+    const config = chosen && this.registry ? this.registry.claudeConfig(chosen) : this.config;
+    this.evictForNewSession();
+    const { history, blocks } = coldStart(conversation);
+    const session = new ClaudeSession(
+      {
+        key,
+        providerId,
+        model: input.upstreamModel,
+        effort: input.effort,
+        system,
+        tools,
+        history,
+        config,
+        onLimits: (m, l) => this.recordLimits(m, l),
+      },
+      (s) => this.sessions.delete(s),
+    );
+    this.sessions.add(session);
+    input.trace.note("started new claude session", {
+      session: session.id,
+      provider: providerId,
+      historyMessages: conversation.length,
+      liveSessions: this.sessions.size,
+    });
+    log.info("new claude session", {
+      session: session.id,
+      provider: providerId,
+      model: input.upstreamModel,
+      history: conversation.length,
+    });
+    return { providerId, events: session.sendUser(blocks, prints, input.trace, input.signal) };
   }
 
   async close(): Promise<void> {
     clearInterval(this.reaper);
     for (const s of this.sessions) s.close("server shutting down");
+  }
+
+  /** Models come from the highest-priority enabled login. */
+  private modelsConfig(): ClaudeConfig {
+    const first = this.registry?.store.enabled()[0];
+    return first && this.registry ? this.registry.claudeConfig(first) : this.config;
   }
 
   private evictForNewSession(): void {
@@ -184,7 +264,7 @@ export class ClaudeProvider implements Provider {
   private async supportedModels(): Promise<ModelInfo[]> {
     if (this.models && Date.now() - this.models.at < MODEL_CACHE_MS) return this.models.list;
     try {
-      const list = await probeModels(this.config);
+      const list = await probeModels(this.modelsConfig());
       this.models = { at: Date.now(), list };
       return list;
     } catch (error) {
@@ -238,32 +318,6 @@ export function matchSession<S extends SessionLike>(
     }
   }
   return { kind: "none" };
-}
-
-/** Asks a short-lived Claude Code process which models this login can use. */
-export async function probeModels(config: ClaudeConfig): Promise<ModelInfo[]> {
-  const q = openProbe(config);
-  try {
-    return await q.supportedModels();
-  } finally {
-    q.close();
-  }
-}
-
-export function openProbe(config: ClaudeConfig) {
-  const env: Record<string, string | undefined> = { ...process.env, ...config.env };
-  if (config.stripApiKey) delete env.ANTHROPIC_API_KEY;
-  return query({
-    prompt: (async function* () {})(),
-    options: {
-      tools: [],
-      settingSources: [],
-      persistSession: false,
-      cwd: config.cwd,
-      env,
-      ...(config.binary === undefined ? {} : { pathToClaudeCodeExecutable: config.binary }),
-    },
-  });
 }
 
 function isUserLike(m: ChatMessage): boolean {

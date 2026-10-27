@@ -43,8 +43,20 @@ export interface ClaudeConfig {
   env: Record<string, string>;
 }
 
+export interface UiConfig {
+  /** Serve the web UI at /ui. */
+  enabled: boolean;
+  /** Run the Vite dev server (HMR, DevTools) instead of the built UI. Set by `--ui-dev`. */
+  dev: boolean;
+  /** Extra Host header names the UI answers to; localhost and server.host are always allowed. "*" allows any. */
+  allowedHosts: string[];
+  /** Send the Content-Security-Policy as report-only. */
+  cspReportOnly: boolean;
+}
+
 export interface Config {
   server: ServerConfig;
+  ui: UiConfig;
   capture: CaptureConfig;
   defaultProvider: ProviderName;
   claude: ClaudeConfig;
@@ -66,6 +78,7 @@ export const userConfigPath = path.join(
 export function defaultConfig(): Config {
   return {
     server: { host: "127.0.0.1", port: 4100, apiKey: undefined },
+    ui: { enabled: true, dev: false, allowedHosts: [], cspReportOnly: false },
     capture: { enabled: false, dir: path.join(stateDir, "captures") },
     defaultProvider: "claude",
     claude: {
@@ -117,6 +130,16 @@ function applyToml(config: Config, raw: Record<string, unknown>, file: string): 
     config.server.host = str(server.host, where("server.host")) ?? config.server.host;
     config.server.port = num(server.port, where("server.port")) ?? config.server.port;
     config.server.apiKey = nonEmpty(str(server.api_key, where("server.api_key")));
+  }
+
+  const ui = table(raw.ui, where("ui"));
+  if (ui) {
+    config.ui.enabled = bool(ui.enabled, where("ui.enabled")) ?? config.ui.enabled;
+    if (ui.allowed_hosts !== undefined) {
+      config.ui.allowedHosts = strList(ui.allowed_hosts, where("ui.allowed_hosts"));
+    }
+    config.ui.cspReportOnly =
+      bool(ui.csp_report_only, where("ui.csp_report_only")) ?? config.ui.cspReportOnly;
   }
 
   const capture = table(raw.capture, where("capture"));

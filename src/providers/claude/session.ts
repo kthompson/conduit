@@ -12,7 +12,7 @@ import type { ClaudeConfig } from "../../config.ts";
 import type { Trace } from "../../capture/recorder.ts";
 import type { ChatMessage, FinishReason, FunctionTool, Usage } from "../../openai/types.ts";
 import { log } from "../../log.ts";
-import type { TurnEvent } from "../types.ts";
+import type { TurnEvent, TurnFailure } from "../types.ts";
 import { assistantFingerprint, type ToolResultContent, type UserBlock } from "./conversation.ts";
 import { buildSeedEntries, scratchConfigDir, SeedStore } from "./seed.ts";
 import { BRIDGE_SERVER, ToolBridge } from "./toolBridge.ts";
@@ -24,6 +24,8 @@ export type SessionState = "busy" | "awaiting_tools" | "idle" | "closed";
 
 export interface SessionOptions {
   key: string;
+  /** Which configured provider (login) this process runs under. */
+  providerId: string;
   model: string;
   effort: string | undefined;
   system: string;
@@ -56,6 +58,7 @@ interface ActiveTurn {
 export class ClaudeSession {
   readonly id = crypto.randomUUID().slice(0, 8);
   readonly key: string;
+  readonly providerId: string;
   readonly model: string;
   state: SessionState = "idle";
   lastUsed = Date.now();
@@ -70,6 +73,11 @@ export class ClaudeSession {
   private turn: ActiveTurn | undefined;
   /** The finished turn's `result` message is still to come and belongs to no turn. */
   private awaitingResult = false;
+  /** What Claude Code last said about why requests are failing, used to classify a failed turn. */
+  private lastError: { code: string | undefined; resetsAt: number | undefined } = {
+    code: undefined,
+    resetsAt: undefined,
+  };
   private readonly onClose: (session: ClaudeSession) => void;
 
   private readonly onLimits: SessionOptions["onLimits"];
@@ -78,6 +86,7 @@ export class ClaudeSession {
 
   constructor(options: SessionOptions, onClose: (session: ClaudeSession) => void) {
     this.key = options.key;
+    this.providerId = options.providerId;
     this.model = options.model;
     this.onClose = onClose;
     this.onLimits = options.onLimits;
@@ -133,7 +142,14 @@ export class ClaudeSession {
     this.state = "closed";
     log.debug("claude session closed", { session: this.id, reason });
     this.bridge.cancelAll(`Session closed: ${reason}`);
-    if (this.turn) this.endTurn({ type: "error", message: `Claude session closed: ${reason}` });
+    if (this.turn) {
+      const failure = classifyFailure(this.lastError.code, reason, this.lastError.resetsAt);
+      this.endTurn({
+        type: "error",
+        message: `Claude session closed: ${reason}`,
+        ...(failure ? { failure } : {}),
+      });
+    }
     this.input.end();
     this.query.close();
     this.cleanup?.();
@@ -208,6 +224,17 @@ export class ClaudeSession {
     switch (message.type) {
       case "stream_event":
         if (message.parent_tool_use_id === null) this.handleStream(message.event);
+        return;
+      case "assistant":
+        if (message.error) this.lastError.code = message.error;
+        return;
+      case "rate_limit_event":
+        if (message.rate_limit_info.status === "rejected") {
+          this.lastError.code = "rate_limit";
+          const reset = message.rate_limit_info.resetsAt;
+          // The SDK reports epoch seconds.
+          this.lastError.resetsAt = reset === undefined ? undefined : reset * 1000;
+        }
         return;
       case "result":
         return this.handleResult(message);
@@ -325,7 +352,9 @@ export class ClaudeSession {
         result.subtype === "success"
           ? result.result
           : (result.errors ?? []).join("; ") || result.subtype;
-      this.endTurn({ type: "error", message: detail || "Claude Code reported an error." });
+      const message = detail || "Claude Code reported an error.";
+      const failure = classifyFailure(this.lastError.code, message, this.lastError.resetsAt);
+      this.endTurn({ type: "error", message, ...(failure ? { failure } : {}) });
       this.close("turn failed");
       return;
     }
@@ -359,6 +388,34 @@ export class ClaudeSession {
     turn.events.push(final);
     turn.events.end();
   }
+}
+
+const AUTH_ERRORS = new Set([
+  "authentication_failed",
+  "oauth_org_not_allowed",
+  "account_on_hold",
+  "verification_required",
+  "billing_error",
+]);
+
+/** Decides whether a failed turn says the provider is rate limited or logged out. */
+export function classifyFailure(
+  code: string | undefined,
+  message: string,
+  resetsAt?: number,
+): TurnFailure | undefined {
+  if (code === "rate_limit" || /rate.?limit|usage limit|limit reached|\b429\b/i.test(message)) {
+    return { kind: "rate_limit", ...(resetsAt === undefined ? {} : { resetsAt }) };
+  }
+  if (
+    (code !== undefined && AUTH_ERRORS.has(code)) ||
+    /not logged in|\/login|authenticat|invalid api key|unauthorized|\b401\b|credentials/i.test(
+      message,
+    )
+  ) {
+    return { kind: "auth" };
+  }
+  return undefined;
 }
 
 function buildEnv(config: ClaudeConfig): Record<string, string | undefined> {
