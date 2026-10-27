@@ -1,0 +1,175 @@
+# conduit's system primitives. The visual-recap skill classifies a diff against this map.
+# `code` entries are file paths or directory prefixes (end with "/"). Longest match wins.
+# Keep summaries to one short line; put detail in README.md.
+
+version = 1
+
+[[groups]]
+id = "surface"
+name = "Client surface"
+
+[[groups]]
+id = "providers"
+name = "Providers"
+
+[[groups]]
+id = "claude"
+name = "Claude provider"
+
+[[groups]]
+id = "tooling"
+name = "Tooling"
+
+[[primitives]]
+id = "http-server"
+name = "HTTP server"
+group = "surface"
+summary = "Routing, bearer auth and model routing for /v1 endpoints."
+code = ["src/server.ts"]
+docs = ["README.md#using-it-from-github-copilot"]
+
+[[primitives]]
+id = "openai-wire"
+name = "OpenAI wire format"
+group = "surface"
+summary = "Chat Completions types plus SSE and JSON output."
+code = ["src/openai/"]
+docs = ["README.md#models-and-effort"]
+
+[[primitives]]
+id = "provider-interface"
+name = "Provider interface"
+group = "providers"
+summary = "Normalized turn events shared by every provider."
+code = ["src/providers/types.ts"]
+docs = ["README.md#how-conversations-map-onto-claude-code"]
+
+[[primitives]]
+id = "claude-sessions"
+name = "Claude sessions"
+group = "claude"
+summary = "One live Claude Code process per conversation."
+code = ["src/providers/claude/session.ts", "src/channel.ts"]
+docs = ["README.md#how-conversations-map-onto-claude-code"]
+
+[[primitives]]
+id = "conversation-matching"
+name = "Conversation matching"
+group = "claude"
+summary = "Maps each request onto a live session, or cold-starts one."
+code = ["src/providers/claude/provider.ts", "src/providers/claude/conversation.ts"]
+docs = ["README.md#how-conversations-map-onto-claude-code"]
+
+[[primitives]]
+id = "history-seed"
+name = "History seeding"
+group = "claude"
+summary = "Replays earlier history into a fresh process as real turns."
+code = ["src/providers/claude/seed.ts"]
+docs = ["README.md#how-conversations-map-onto-claude-code"]
+
+[[primitives]]
+id = "tool-bridge"
+name = "Tool bridge"
+group = "claude"
+summary = "Exposes harness tools to Claude over an in-process MCP server."
+code = ["src/providers/claude/toolBridge.ts"]
+docs = ["README.md#features"]
+
+[[primitives]]
+id = "model-limits"
+name = "Model limits"
+group = "claude"
+summary = "Built-in context window and output caps per model."
+code = ["src/providers/claude/limits.ts"]
+docs = ["README.md#configure-github-copilot-desktop"]
+
+[[primitives]]
+id = "mock-provider"
+name = "Mock provider"
+group = "providers"
+summary = "Free test model used by capture mode."
+code = ["src/providers/mock/"]
+docs = ["README.md#capture-and-test-mode"]
+
+[[primitives]]
+id = "capture"
+name = "Capture recorder"
+group = "tooling"
+summary = "Records each HTTP exchange as redacted JSON."
+code = ["src/capture/"]
+docs = ["README.md#capture-and-test-mode"]
+
+[[primitives]]
+id = "config"
+name = "Config"
+group = "tooling"
+summary = "TOML config lookup, defaults and validation."
+code = ["src/config.ts", "conduit.example.toml"]
+docs = ["README.md#config"]
+
+[[primitives]]
+id = "cli"
+name = "CLI"
+group = "tooling"
+summary = "The conduit command and its subcommands."
+code = ["src/cli.ts", "src/log.ts", "bin/"]
+docs = ["README.md#commands"]
+
+[[primitives]]
+id = "copilot-setup"
+name = "Copilot Desktop setup"
+group = "tooling"
+summary = "Writes conduit's models into Copilot's data.db."
+code = ["src/setup-copilot.ts"]
+docs = ["README.md#configure-github-copilot-desktop"]
+
+# Rules the code relies on. Call out any that a change touches.
+
+[[invariants]]
+id = "session-identity"
+summary = "A session is identified by system prompt, tool set, model and effort."
+code = ["src/providers/claude/conversation.ts", "src/providers/claude/provider.ts"]
+docs = ["README.md#how-conversations-map-onto-claude-code"]
+
+[[invariants]]
+id = "tool-call-id"
+summary = "Tool results match by Claude's own toolu_ id, so the same process continues."
+code = ["src/providers/claude/toolBridge.ts", "src/providers/claude/session.ts"]
+docs = ["README.md#how-conversations-map-onto-claude-code"]
+
+[[invariants]]
+id = "claude-as-model"
+summary = "Claude Code's built-in tools stay off; only harness tools are exposed."
+code = ["src/providers/claude/session.ts", "src/providers/claude/provider.ts"]
+docs = ["README.md#features"]
+
+[[invariants]]
+id = "subscription-billing"
+summary = "ANTHROPIC_API_KEY is stripped so usage goes to the subscription."
+code = ["src/providers/claude/session.ts", "src/providers/claude/provider.ts", "src/config.ts"]
+docs = ["README.md#config"]
+
+[[invariants]]
+id = "capture-redaction"
+summary = "Captured requests redact secrets."
+code = ["src/capture/recorder.ts"]
+docs = ["README.md#capture-and-test-mode"]
+
+[[invariants]]
+id = "api-key-auth"
+summary = "When server.api_key is set, every request must carry it."
+code = ["src/server.ts", "src/config.ts"]
+docs = ["README.md#config"]
+
+[[invariants]]
+id = "claude-isolation"
+summary = "Claude runs with setting_sources empty, so CLAUDE.md, hooks and plugins stay out."
+code = ["src/providers/claude/session.ts", "src/providers/claude/provider.ts", "src/config.ts"]
+docs = ["README.md#config"]
+
+[[invariants]]
+id = "thinking-not-replayed"
+summary = "Seeded history never replays thinking, since signatures can't be forged."
+code = ["src/providers/claude/seed.ts"]
+docs = ["README.md#how-conversations-map-onto-claude-code"]
