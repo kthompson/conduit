@@ -11,6 +11,7 @@
     "dev": "node src/cli.ts serve",
     "capture": "node src/cli.ts capture",
     "typecheck": "tsc --noEmit",
+    "primitives:check": "node .agents/skills/visual-recap/scripts/check-primitives-map.ts",
     "test": "node --test test/*.test.ts",
     "lint": "oxlint",
     "format": "oxfmt",

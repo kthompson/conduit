@@ -14,6 +14,29 @@ Claude acts as a **model** here, not an agent. Claude Code's built-in tools are 
 The harness's tools are exposed to Claude through an in-process MCP server, and every
 tool call goes back to the harness as an ordinary `tool_calls` response for it to run.
 
+## Features
+
+- **OpenAI-compatible API.** `POST /v1/chat/completions` (streaming and non-streaming, with
+  optional usage reporting), `GET /v1/models`, and `GET /health`. The `/v1` prefix is optional.
+- **Subscription-backed.** Requests run through your own Claude Code login; the Anthropic API
+  key is stripped from the environment so usage goes to your plan.
+- **Harness tools, not Claude's.** Claude Code's built-in tools are disabled. The harness's
+  tools reach Claude over an in-process MCP server and come back as standard `tool_calls`.
+- **Warm sessions.** One live Claude Code process per conversation, so tool round trips and
+  follow-up turns keep the prompt cache warm. Idle sessions expire and the number of live
+  processes is capped.
+- **Resumable history.** After a restart, model switch or edited history, earlier turns are
+  replayed into a fresh process as real turns, so the conversation carries on.
+- **Any Claude model, with effort control.** Use full ids or aliases (`opus`, `sonnet`,
+  `haiku`). Set effort per request, with a `:effort` model suffix, or in config.
+- **Streamed thinking.** Returned as `reasoning_content`, inline `<think>` tags, or dropped.
+- **Isolated by default.** Your CLAUDE.md, hooks, plugins and MCP servers stay out of the model.
+- **Optional API key.** Set `server.api_key` to require a bearer token on every request.
+- **Capture and mock mode.** Record any client's traffic as JSON, or test a harness against a
+  free mock model.
+- **Copilot Desktop setup.** `conduit setup copilot` registers conduit's models, with real
+  context windows, output caps and reasoning efforts.
+
 ## Quick start
 
 ```bash
@@ -47,13 +70,14 @@ carry `/v1` or not. For other surfaces, such as Copilot Desktop, run `conduit ca
 
 ## Commands
 
-| Command           | What it does                                                |
-| ----------------- | ----------------------------------------------------------- |
-| `conduit serve`   | Serve Chat Completions backed by Claude Code                |
-| `conduit capture` | Serve the **mock** model and record every exchange to JSON  |
-| `conduit models`  | List the models your login can use                          |
-| `conduit doctor`  | Check Claude Code, auth source and models                   |
-| `conduit init`    | Write the example config to `~/.config/conduit/config.toml` |
+| Command                 | What it does                                                |
+| ----------------------- | ----------------------------------------------------------- |
+| `conduit serve`         | Serve Chat Completions backed by Claude Code                |
+| `conduit capture`       | Serve the **mock** model and record every exchange to JSON  |
+| `conduit models`        | List the models your login can use                          |
+| `conduit doctor`        | Check Claude Code, auth source and models                   |
+| `conduit init`          | Write the example config to `~/.config/conduit/config.toml` |
+| `conduit setup copilot` | Register conduit's models in Copilot Desktop (see below)    |
 
 Flags: `-c/--config`, `-p/--port`, `-H/--host`, `--provider claude|mock`, `--capture [dir]`, `-v`.
 
