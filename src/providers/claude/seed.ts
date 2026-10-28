@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { copyFileSync, mkdtempSync, rmSync, statSync, symlinkSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { SessionKey, SessionStore, SessionStoreEntry } from "@anthropic-ai/claude-agent-sdk";
@@ -179,12 +179,34 @@ export function scratchConfigDir(configured: string | undefined): {
 } {
   const source = configured ?? process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude");
   const dir = mkdtempSync(path.join(os.tmpdir(), "conduit-claude-"));
+  const from = path.join(source, ".credentials.json");
+  const to = path.join(dir, ".credentials.json");
+  let copied = false;
   try {
-    symlinkSync(path.join(source, ".credentials.json"), path.join(dir, ".credentials.json"));
+    try {
+      symlinkSync(from, to);
+    } catch (error) {
+      // Windows forbids symlinks without developer mode or elevation.
+      if ((error as NodeJS.ErrnoException).code !== "EPERM") throw error;
+      copyFileSync(from, to);
+      copied = true;
+    }
   } catch (error) {
     log.warn("could not link Claude credentials into the scratch config dir", {
       error: String(error),
     });
   }
-  return { dir, remove: () => rmSync(dir, { recursive: true, force: true }) };
+  return {
+    dir,
+    remove: () => {
+      // Refresh tokens rotate, so a refresh inside the scratch dir invalidates
+      // the one in the real file; carry the newer file back.
+      if (copied) {
+        try {
+          if (statSync(to).mtimeMs > statSync(from).mtimeMs) copyFileSync(to, from);
+        } catch {}
+      }
+      rmSync(dir, { recursive: true, force: true });
+    },
+  };
 }
