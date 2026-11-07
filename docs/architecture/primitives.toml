@@ -17,6 +17,10 @@ id = "claude"
 name = "Claude provider"
 
 [[groups]]
+id = "codex"
+name = "Codex provider"
+
+[[groups]]
 id = "tooling"
 name = "Tooling"
 
@@ -24,7 +28,7 @@ name = "Tooling"
 id = "http-server"
 name = "HTTP server"
 group = "surface"
-summary = "Routing, bearer auth and model routing for /v1 endpoints."
+summary = "Routing, bearer auth and model-to-provider routing for /v1 endpoints."
 code = ["src/server.ts"]
 docs = ["README.md#using-it-from-github-copilot"]
 
@@ -42,23 +46,67 @@ name = "Provider interface"
 group = "providers"
 summary = "Normalized turn events shared by every provider."
 code = ["src/providers/types.ts"]
-docs = ["README.md#how-conversations-map-onto-claude-code"]
+docs = ["README.md#how-conversations-map-onto-live-sessions"]
+
+[[primitives]]
+id = "session-core"
+name = "Session lifecycle"
+group = "providers"
+summary = "The turn lifecycle every live agent process shares: state, transcript, tool hand-off, close."
+code = ["src/providers/session.ts", "src/channel.ts"]
+docs = ["README.md#how-conversations-map-onto-live-sessions"]
+
+[[primitives]]
+id = "conversation-provider"
+name = "Session pool and failover"
+group = "providers"
+summary = "Matches a request to a live session or starts one, bounds the pool, retries on the next login."
+code = ["src/providers/conversationProvider.ts"]
+docs = ["README.md#providers-and-the-web-ui", "docs/adding-a-provider.md"]
+
+[[primitives]]
+id = "conversation-matching"
+name = "Conversation matching"
+group = "providers"
+summary = "Maps each request onto a live session, or cold-starts one."
+code = ["src/providers/matching.ts", "src/providers/conversation.ts"]
+docs = ["README.md#how-conversations-map-onto-live-sessions"]
+
+[[primitives]]
+id = "pending-tools"
+name = "Pending tool calls"
+group = "providers"
+summary = "Holds a model's tool call open until the HTTP client returns its result."
+code = ["src/providers/pendingTools.ts"]
+docs = ["README.md#how-conversations-map-onto-live-sessions"]
+
+[[primitives]]
+id = "provider-routing"
+name = "Logins and failover"
+group = "providers"
+summary = "Provider logins in priority order, cooldowns, usage counters and failure classification."
+code = ["src/providers/store.ts", "src/providers/registry.ts", "src/providers/failure.ts"]
+docs = ["README.md#providers-and-the-web-ui"]
 
 [[primitives]]
 id = "claude-sessions"
 name = "Claude sessions"
 group = "claude"
 summary = "One live Claude Code process per conversation."
-code = ["src/providers/claude/session.ts", "src/channel.ts"]
-docs = ["README.md#how-conversations-map-onto-claude-code"]
+code = ["src/providers/claude/session.ts", "src/providers/claude/options.ts"]
+docs = ["README.md#how-conversations-map-onto-live-sessions"]
 
 [[primitives]]
-id = "conversation-matching"
-name = "Conversation matching"
+id = "claude-provider"
+name = "Claude provider"
 group = "claude"
-summary = "Maps each request onto a live session, or cold-starts one."
-code = ["src/providers/claude/provider.ts", "src/providers/claude/conversation.ts"]
-docs = ["README.md#how-conversations-map-onto-claude-code"]
+summary = "Claude model listing, limits learning and session creation."
+code = [
+  "src/providers/claude/provider.ts",
+  "src/providers/claude/probe.ts",
+  "src/providers/claude/usage.ts",
+]
+docs = ["README.md#models-and-effort"]
 
 [[primitives]]
 id = "history-seed"
@@ -66,7 +114,7 @@ name = "History seeding"
 group = "claude"
 summary = "Replays earlier history into a fresh process as real turns."
 code = ["src/providers/claude/seed.ts"]
-docs = ["README.md#how-conversations-map-onto-claude-code"]
+docs = ["README.md#how-conversations-map-onto-live-sessions"]
 
 [[primitives]]
 id = "tool-bridge"
@@ -83,6 +131,46 @@ group = "claude"
 summary = "Built-in context window and output caps per model."
 code = ["src/providers/claude/limits.ts"]
 docs = ["README.md#configure-github-copilot-desktop"]
+
+[[primitives]]
+id = "codex-sessions"
+name = "Codex sessions"
+group = "codex"
+summary = "One live codex app-server process and thread per conversation."
+code = ["src/providers/codex/session.ts", "src/providers/codex/appServer.ts"]
+docs = ["README.md#codex"]
+
+[[primitives]]
+id = "codex-provider"
+name = "Codex provider"
+group = "codex"
+summary = "Codex model listing, effort filtering and session creation."
+code = ["src/providers/codex/provider.ts", "src/providers/codex/models.ts"]
+docs = ["README.md#models-and-effort"]
+
+[[primitives]]
+id = "codex-seed"
+name = "Codex history seeding"
+group = "codex"
+summary = "Replays earlier history into a fresh thread as Responses items."
+code = ["src/providers/codex/seed.ts"]
+docs = ["README.md#how-conversations-map-onto-live-sessions"]
+
+[[primitives]]
+id = "codex-home"
+name = "Codex scratch home"
+group = "codex"
+summary = "A throwaway CODEX_HOME with only the login and a minimal generated config."
+code = ["src/providers/codex/home.ts"]
+docs = ["README.md#codex"]
+
+[[primitives]]
+id = "codex-usage"
+name = "Codex usage"
+group = "codex"
+summary = "Account and plan windows read from Codex's rate limits."
+code = ["src/providers/codex/usage.ts"]
+docs = ["README.md#providers-and-the-web-ui"]
 
 [[primitives]]
 id = "mock-provider"
@@ -112,8 +200,15 @@ docs = ["README.md#config"]
 id = "cli"
 name = "CLI"
 group = "tooling"
-summary = "The conduit command and its subcommands."
-code = ["src/cli.ts", "src/log.ts", "bin/"]
+summary = "The conduit command, its subcommands and the provider wiring."
+code = [
+  "src/cli.ts",
+  "src/doctor.ts",
+  "src/serve.ts",
+  "src/providers/active.ts",
+  "src/log.ts",
+  "bin/",
+]
 docs = ["README.md#commands"]
 
 [[primitives]]
@@ -129,25 +224,34 @@ docs = ["README.md#configure-github-copilot-desktop"]
 [[invariants]]
 id = "session-identity"
 summary = "A session is identified by system prompt, tool set, model and effort."
-code = ["src/providers/claude/conversation.ts", "src/providers/claude/provider.ts"]
-docs = ["README.md#how-conversations-map-onto-claude-code"]
+code = [
+  "src/providers/conversation.ts",
+  "src/providers/conversationProvider.ts",
+  "src/providers/matching.ts",
+]
+docs = ["README.md#how-conversations-map-onto-live-sessions"]
 
 [[invariants]]
 id = "tool-call-id"
-summary = "Tool results match by Claude's own toolu_ id, so the same process continues."
-code = ["src/providers/claude/toolBridge.ts", "src/providers/claude/session.ts"]
-docs = ["README.md#how-conversations-map-onto-claude-code"]
+summary = "Tool results match by the agent's own call id, so the same process continues."
+code = [
+  "src/providers/claude/toolBridge.ts",
+  "src/providers/claude/session.ts",
+  "src/providers/codex/session.ts",
+  "src/providers/pendingTools.ts",
+]
+docs = ["README.md#how-conversations-map-onto-live-sessions"]
 
 [[invariants]]
 id = "claude-as-model"
 summary = "Claude Code's built-in tools stay off; only harness tools are exposed."
-code = ["src/providers/claude/session.ts", "src/providers/claude/provider.ts"]
+code = ["src/providers/claude/session.ts", "src/providers/claude/options.ts"]
 docs = ["README.md#features"]
 
 [[invariants]]
 id = "subscription-billing"
-summary = "ANTHROPIC_API_KEY is stripped so usage goes to the subscription."
-code = ["src/providers/claude/session.ts", "src/providers/claude/provider.ts", "src/config.ts"]
+summary = "ANTHROPIC_API_KEY and OPENAI_API_KEY are stripped so usage goes to the subscription."
+code = ["src/providers/claude/options.ts", "src/providers/codex/appServer.ts", "src/config.ts"]
 docs = ["README.md#config"]
 
 [[invariants]]
@@ -165,11 +269,35 @@ docs = ["README.md#config"]
 [[invariants]]
 id = "claude-isolation"
 summary = "Claude runs with setting_sources empty, so CLAUDE.md, hooks and plugins stay out."
-code = ["src/providers/claude/session.ts", "src/providers/claude/provider.ts", "src/config.ts"]
+code = ["src/providers/claude/options.ts", "src/config.ts"]
 docs = ["README.md#config"]
 
 [[invariants]]
 id = "thinking-not-replayed"
 summary = "Seeded history never replays thinking, since signatures can't be forged."
 code = ["src/providers/claude/seed.ts"]
-docs = ["README.md#how-conversations-map-onto-claude-code"]
+docs = ["README.md#how-conversations-map-onto-live-sessions"]
+
+[[invariants]]
+id = "codex-as-model"
+summary = "Codex gets no environment, a read-only sandbox and declined approvals; only harness tools act."
+code = ["src/providers/codex/session.ts"]
+docs = ["README.md#codex"]
+
+[[invariants]]
+id = "codex-isolation"
+summary = "Codex runs on a scratch CODEX_HOME, so its config, MCP servers and plugins stay out."
+code = ["src/providers/codex/home.ts", "src/providers/codex/appServer.ts"]
+docs = ["README.md#codex"]
+
+[[invariants]]
+id = "model-ownership"
+summary = "A model id is served by the provider that owns it; unclaimed ids go to default_provider."
+code = ["src/server.ts", "src/providers/types.ts"]
+docs = ["README.md#models-and-effort"]
+
+[[invariants]]
+id = "login-type-isolation"
+summary = "Failover only moves between logins of the same provider type."
+code = ["src/providers/registry.ts", "src/providers/conversationProvider.ts"]
+docs = ["README.md#providers-and-the-web-ui"]

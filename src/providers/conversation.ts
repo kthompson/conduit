@@ -1,12 +1,7 @@
 import { createHash } from "node:crypto";
-import {
-  textOf,
-  type ChatMessage,
-  type ContentPart,
-  type FunctionTool,
-} from "../../openai/types.ts";
+import { textOf, type ChatMessage, type ContentPart, type FunctionTool } from "../openai/types.ts";
 
-// Anthropic content blocks conduit sends to Claude Code.
+// Neutral user content blocks (Anthropic-shaped); each provider maps them to its own wire format.
 export type UserBlock =
   | { type: "text"; text: string }
   | {
@@ -14,7 +9,7 @@ export type UserBlock =
       source: { type: "base64"; media_type: string; data: string } | { type: "url"; url: string };
     };
 
-// MCP tool result content returned to Claude Code.
+// Tool result content handed back to the model (MCP-shaped).
 export type ToolResultContent =
   | { type: "text"; text: string }
   | { type: "image"; data: string; mimeType: string };
@@ -25,7 +20,7 @@ const normalize = (text: string) => text.replaceAll(/\s+/g, " ").trim();
 /**
  * Splits a request into the system prompt (leading system/developer messages)
  * and the conversation. A system message after the first turn stays in the
- * conversation and is shown to Claude as user content.
+ * conversation and is shown to the model as user content.
  */
 export function splitSystem(messages: ChatMessage[]): {
   system: string;
@@ -68,7 +63,7 @@ export function assistantFingerprint(text: string, toolCallIds: string[]): strin
   return toolCallIds.length > 0 ? `a:calls:${toolCallIds.join(",")}` : `a:${hash(normalize(text))}`;
 }
 
-/** Identity of everything fixed for the life of a Claude Code process. */
+/** Identity of everything fixed for the life of a provider process. */
 export function sessionKey(input: {
   system: string;
   tools: FunctionTool[] | undefined;

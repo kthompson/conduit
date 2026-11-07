@@ -4,6 +4,7 @@ import { z } from "zod";
 import { expandHome, stateDir, userConfigPath } from "../config.ts";
 import { log } from "../log.ts";
 
+/** The implicit Claude login: whatever Claude Code uses by default. Always present. */
 export const DEFAULT_PROVIDER_ID = "default";
 
 const base = {
@@ -19,11 +20,18 @@ const claudeEntry = z.object({
   configDir: z.string().min(1).optional(),
 });
 
-/** Add further provider types (codex, copilot, ...) to this union. */
-export const providerEntrySchema = z.discriminatedUnion("type", [claudeEntry]);
+/** A Codex login. `configDir` is its CODEX_HOME; unset means "whatever Codex uses by default". */
+const codexEntry = z.object({
+  ...base,
+  type: z.literal("codex"),
+  configDir: z.string().min(1).optional(),
+});
+
+/** Add further provider types (copilot, ...) to this union. */
+export const providerEntrySchema = z.discriminatedUnion("type", [claudeEntry, codexEntry]);
 export type ProviderEntry = z.infer<typeof providerEntrySchema>;
 export type ProviderType = ProviderEntry["type"];
-export const providerTypes: ProviderType[] = ["claude"];
+export const providerTypes: ProviderType[] = ["claude", "codex"];
 
 const fileSchema = z.object({
   version: z.literal(1),
@@ -44,7 +52,7 @@ export class ProviderConflictError extends Error {
 export interface NewProvider {
   type: ProviderType;
   name: string;
-  /** Claude: directory holding this login. Defaults to <config>/conduit/accounts/<slug>. */
+  /** Directory holding this login (CLAUDE_CONFIG_DIR or CODEX_HOME). Defaults to <config>/conduit/accounts/<slug>. */
   configDir?: string | undefined;
 }
 
@@ -65,7 +73,8 @@ export function defaultConfigDir(name: string): string {
 
 /**
  * The providers the user has configured, in priority order, persisted as JSON.
- * The implicit "default" Claude login is always present and cannot be removed.
+ * Priority applies within a provider type. The implicit "default" Claude login
+ * is always present and cannot be removed; Codex logins exist only once added.
  */
 export class ProviderStore {
   private readonly file: string;
@@ -86,9 +95,9 @@ export class ProviderStore {
     return this.entries.find((e) => e.id === id);
   }
 
-  /** Enabled providers in priority order. */
-  enabled(): ProviderEntry[] {
-    return this.entries.filter((e) => e.enabled);
+  /** Enabled providers in priority order, optionally only those of one type. */
+  enabled(type?: ProviderType): ProviderEntry[] {
+    return this.entries.filter((e) => e.enabled && (type === undefined || e.type === type));
   }
 
   add(input: NewProvider): ProviderEntry {
@@ -101,7 +110,7 @@ export class ProviderStore {
     const configDir = path.resolve(
       expandHome(given !== undefined && given.length > 0 ? given : defaultConfigDir(name)),
     );
-    if (this.entries.some((e) => e.type === "claude" && e.configDir === configDir)) {
+    if (this.entries.some((e) => e.type === input.type && e.configDir === configDir)) {
       throw new ProviderConflictError("configDir", `Another provider already uses ${configDir}`);
     }
     mkdirSync(configDir, { recursive: true, mode: 0o700 });
@@ -134,10 +143,19 @@ export class ProviderStore {
     return next;
   }
 
-  /** Moves a provider one step toward the front (up, higher priority) or the back (down). */
+  /**
+   * Moves a provider one step toward the front (up, higher priority) or the back
+   * (down), past the neighbour of the same type: priority only matters among logins
+   * of one provider type.
+   */
   move(id: string, direction: "up" | "down"): void {
     const index = this.indexOf(id);
-    const target = direction === "up" ? index - 1 : index + 1;
+    const step = direction === "up" ? -1 : 1;
+    const type = (this.entries[index] as ProviderEntry).type;
+    let target = index + step;
+    while (target >= 0 && target < this.entries.length && this.entries[target]?.type !== type) {
+      target += step;
+    }
     if (target < 0 || target >= this.entries.length) return;
     const moved = this.entries[index] as ProviderEntry;
     this.entries[index] = this.entries[target] as ProviderEntry;

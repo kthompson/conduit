@@ -15,7 +15,7 @@ export function meta() {
 export function loader({ context }: Route.LoaderArgs) {
   const { registry } = context.get(conduitContext);
   const providers = toView(registry.status());
-  // Usage streams in per provider; each read spawns a Claude Code process and is cached for a minute.
+  // Usage streams in per provider; each read spawns a Claude Code or Codex process and is cached for a minute.
   return {
     providers: providers.map((p) => ({ provider: p, usage: usageView(registry, p.id) })),
   };
@@ -67,8 +67,9 @@ export default function Providers({ loaderData }: Route.ComponentProps) {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Providers</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            New conversations go to the first ready provider, top to bottom. If it is rate limited
-            or logged out, conduit moves on to the next.
+            Each model goes to the provider type that owns it. Within a type, new conversations go
+            to the first ready login, top to bottom. If it is rate limited or logged out, conduit
+            moves on to the next one.
           </p>
         </div>
         <Button asChild>

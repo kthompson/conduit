@@ -1,7 +1,8 @@
 # conduit configuration.
 # Looked up in order: --config, $CONDUIT_CONFIG, ./conduit.toml, ~/.config/conduit/config.toml
 
-# Provider for models not listed under [models]: "claude" or "mock".
+# Where model ids that no provider recognizes go: "claude", "codex" or "mock".
+# Known ids (claude-*, opus/sonnet/haiku, gpt-*, o<N>) always go to the provider that owns them.
 default_provider = "claude"
 
 [server]
@@ -51,3 +52,32 @@ reasoning = "reasoning_content"
 # Extra environment for Claude Code.
 # [providers.claude.env]
 # CLAUDE_CODE_MAX_OUTPUT_TOKENS = "32000"
+
+[providers.codex]
+# Settings shared by every Codex login. Add the logins themselves in the web UI
+# (Providers, Add provider, type Codex); that is all it takes to serve Codex models.
+# Needs the Codex CLI and `codex login`.
+# Codex binary. Unset uses `codex` from PATH.
+# binary = "~/.local/bin/codex"
+# Working directory for the Codex process.
+# cwd = "~"
+# Remove OPENAI_API_KEY from Codex's env so it uses your ChatGPT login.
+strip_api_key = true
+# Close a conversation's Codex process after this long without use.
+session_idle_seconds = 900
+# Most Codex processes kept alive at once.
+max_sessions = 8
+# How long Codex waits for the client to run a tool and send back the result.
+tool_timeout_seconds = 3600
+# Default effort when the request has no reasoning_effort (Codex lists each model's own): low, medium, high, xhigh, max, ultra.
+# effort = "high"
+# Context window (tokens) reported in /v1/models until a live turn reports the model's real one.
+# context_window = 272000
+# How thinking is returned: "reasoning_content" (delta field), "think_tags" (<think> in content), or "none".
+reasoning = "reasoning_content"
+# Codex calls tools one at a time or in a burst; wait this long for siblings before handing the batch to the client.
+tool_settle_ms = 150
+
+# Extra environment for Codex.
+# [providers.codex.env]
+# CODEX_HOME = "~/.codex"

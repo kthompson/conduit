@@ -5,7 +5,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { defaultConfig } from "../src/config.ts";
 import { classifyFailure } from "../src/providers/claude/session.ts";
-import type { ProviderUsage } from "../src/providers/claude/usage.ts";
+import type { ProviderUsage } from "../src/providers/usage.ts";
 import { ProviderRegistry } from "../src/providers/registry.ts";
 import { DEFAULT_PROVIDER_ID, ProviderStore, slugify } from "../src/providers/store.ts";
 
@@ -110,8 +110,8 @@ test("a corrupt file is reported, not silently replaced", () => {
 test("entries of unknown provider types are ignored but preserved on save", () => {
   const dir = tmp();
   const file = path.join(dir, "providers.json");
-  const codex = { id: "codex", type: "codex", name: "codex", enabled: true, configDir: "/x" };
-  writeFileSync(file, JSON.stringify({ version: 1, providers: [codex] }));
+  const grok = { id: "grok", type: "grok", name: "grok", enabled: true, configDir: "/x" };
+  writeFileSync(file, JSON.stringify({ version: 1, providers: [grok] }));
   const store = new ProviderStore(file);
   assert.deepEqual(
     store.list().map((e) => e.id),
@@ -121,9 +121,9 @@ test("entries of unknown provider types are ignored but preserved on save", () =
   const saved = JSON.parse(readFileSync(file, "utf8")) as { providers: { id: string }[] };
   assert.deepEqual(
     saved.providers.map((e) => e.id),
-    [DEFAULT_PROVIDER_ID, "b", "codex"],
+    [DEFAULT_PROVIDER_ID, "b", "grok"],
   );
-  assert.deepEqual(saved.providers[2], codex);
+  assert.deepEqual(saved.providers[2], grok);
 });
 
 function registryWith(names: string[], now: () => number = Date.now) {
@@ -146,7 +146,7 @@ function registryWith(names: string[], now: () => number = Date.now) {
     error: undefined,
   };
   let fetches = 0;
-  const registry = new ProviderRegistry(store, defaultConfig().claude, {
+  const registry = new ProviderRegistry(store, defaultConfig(), {
     now,
     fetchUsage: () => {
       fetches++;
@@ -238,4 +238,102 @@ test("classifyFailure separates rate limits from login problems", () => {
   assert.equal(classifyFailure("authentication_failed", "x")?.kind, "auth");
   assert.equal(classifyFailure(undefined, "Not logged in · Please run /login")?.kind, "auth");
   assert.equal(classifyFailure(undefined, "context too long"), undefined);
+});
+
+test("a Codex login is its own provider type with its own CODEX_HOME", () => {
+  const dir = tmp();
+  const store = storeIn(dir);
+  assert.equal(store.enabled("codex").length, 0);
+  const work = store.add({ type: "codex", name: "Work", configDir: path.join(dir, "work") });
+  assert.equal(work.type, "codex");
+  assert.deepEqual(
+    store.list().map((e) => [e.id, e.type]),
+    [
+      [DEFAULT_PROVIDER_ID, "claude"],
+      ["work", "codex"],
+    ],
+  );
+  const registry = new ProviderRegistry(store, defaultConfig());
+  assert.equal(registry.codexConfig(work).env.CODEX_HOME, work.configDir);
+  assert.deepEqual(
+    storeIn(dir)
+      .enabled("codex")
+      .map((e) => e.id),
+    ["work"],
+  );
+});
+
+test("the same directory may back a Claude and a Codex login, but not two of one type", () => {
+  const dir = tmp();
+  const store = storeIn(dir);
+  store.add({ type: "claude", name: "A", configDir: path.join(dir, "shared") });
+  store.add({ type: "codex", name: "B", configDir: path.join(dir, "shared") });
+  assert.throws(
+    () => store.add({ type: "codex", name: "C", configDir: path.join(dir, "shared") }),
+    /already uses/,
+  );
+});
+
+test("a Codex login can be removed, and the default Claude login still cannot", () => {
+  const store = storeIn(tmp());
+  const login = store.add({ type: "codex", name: "Codex" });
+  store.remove(login.id);
+  assert.equal(store.get(login.id), undefined);
+  assert.throws(() => store.remove(DEFAULT_PROVIDER_ID), /cannot be removed/);
+});
+
+test("pick considers only logins of the requested type, in priority order", () => {
+  const dir = tmp();
+  const store = storeIn(dir);
+  store.add({ type: "claude", name: "Claude B", configDir: path.join(dir, "cb") });
+  store.add({ type: "codex", name: "Codex A", configDir: path.join(dir, "xa") });
+  store.add({ type: "codex", name: "Codex B", configDir: path.join(dir, "xb") });
+  const registry = new ProviderRegistry(store, defaultConfig());
+  assert.equal(registry.pick(new Set(), "claude")?.id, DEFAULT_PROVIDER_ID);
+  assert.equal(registry.pick(new Set(), "codex")?.id, "codex-a");
+  assert.equal(registry.pick(new Set(["codex-a"]), "codex")?.id, "codex-b");
+  assert.equal(registry.pick(new Set(["codex-a", "codex-b"]), "codex"), undefined);
+  // A Claude cooldown never makes a Codex login unavailable.
+  registry.markFailed(DEFAULT_PROVIDER_ID, "rate_limit", "x", Date.now() + 60_000);
+  assert.equal(registry.pick(new Set(), "codex")?.id, "codex-a");
+});
+
+test("move only swaps logins of the same type", () => {
+  const dir = tmp();
+  const store = storeIn(dir);
+  store.add({ type: "codex", name: "Codex A", configDir: path.join(dir, "xa") });
+  store.add({ type: "claude", name: "Claude B", configDir: path.join(dir, "cb") });
+  assert.deepEqual(
+    store.list().map((e) => e.id),
+    [DEFAULT_PROVIDER_ID, "codex-a", "claude-b"],
+  );
+  store.move("claude-b", "up");
+  assert.deepEqual(
+    store.list().map((e) => e.id),
+    ["claude-b", "codex-a", DEFAULT_PROVIDER_ID],
+  );
+  // The only Codex login has no Codex neighbour to swap with.
+  store.move("codex-a", "up");
+  store.move("codex-a", "down");
+  assert.deepEqual(
+    store.list().map((e) => e.id),
+    ["claude-b", "codex-a", DEFAULT_PROVIDER_ID],
+  );
+});
+
+test("verify names the product that failed to report an account", async () => {
+  const store = storeIn(tmp());
+  store.add({ type: "codex", name: "Codex" });
+  const registry = new ProviderRegistry(store, defaultConfig(), {
+    fetchUsage: () =>
+      Promise.resolve({
+        fetchedAt: 0,
+        account: undefined,
+        windows: [],
+        extraUsage: undefined,
+        error: undefined,
+      }),
+  });
+  assert.match((await registry.verify("codex")).message, /Codex did not report an account/);
+  assert.match((await registry.verify(DEFAULT_PROVIDER_ID)).message, /Claude Code did not report/);
 });

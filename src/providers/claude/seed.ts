@@ -5,7 +5,7 @@ import path from "node:path";
 import type { SessionKey, SessionStore, SessionStoreEntry } from "@anthropic-ai/claude-agent-sdk";
 import { log } from "../../log.ts";
 import { textOf, type ChatMessage } from "../../openai/types.ts";
-import { toToolResultContent, toUserBlocks, type UserBlock } from "./conversation.ts";
+import { toToolResultContent, toUserBlocks, type UserBlock } from "../conversation.ts";
 
 const SYNTHETIC_RESULT = "The client did not return a result for this tool call.";
 

@@ -9,18 +9,18 @@ import {
   type ProviderName,
 } from "./config.ts";
 import { log, setLogLevel } from "./log.ts";
-import { ClaudeProvider } from "./providers/claude/provider.ts";
-import { openProbe } from "./providers/claude/probe.ts";
+import { doctor } from "./doctor.ts";
+import { activeProviders } from "./providers/active.ts";
 import { serve } from "./serve.ts";
 import { defaultCopilotDb, setupCopilot, type CopilotModel } from "./setup-copilot.ts";
 
 const HELP = `conduit — an OpenAI-compatible endpoint for agent subscriptions
 
 Usage:
-  conduit serve    [options]   Serve /v1/chat/completions backed by Claude Code
+  conduit serve    [options]   Serve /v1/chat/completions backed by Claude Code and Codex
   conduit capture  [options]   Serve the mock model and record every exchange
-  conduit models   [options]   List the models your Claude login can use
-  conduit doctor   [options]   Check that Claude Code is installed and logged in
+  conduit models   [options]   List the models your logins can use
+  conduit doctor   [options]   Check that Claude Code and your Codex logins are installed and logged in
   conduit setup copilot [--write] [--no-efforts] [--no-probe] [--db <file>]
                                Register conduit's models in GitHub Copilot Desktop (dry run without --write)
   conduit init                 Write an example config to ${userConfigPath}
@@ -29,7 +29,9 @@ Options:
   -c, --config <file>      Config file (default: ./conduit.toml, then ${userConfigPath})
   -p, --port <n>           Port to listen on
   -H, --host <addr>        Address to bind
-      --provider <name>    Default provider: claude or mock (capture defaults to mock)
+      --provider <name>    Default provider: claude, codex or mock (capture defaults to mock)
+                           Models are routed to the provider that owns them; this only decides
+                           where unrecognized model ids go.
       --capture [dir]      Record requests, responses and upstream events as JSON
       --no-ui              Do not serve the web UI
   -v, --verbose            Debug logging
@@ -107,28 +109,38 @@ async function setup(
 ) {
   const host = config.server.host === "0.0.0.0" ? "127.0.0.1" : config.server.host;
   const baseUrl = `http://${host}:${config.server.port}/v1`;
-  const claude = new ClaudeProvider(config.claude);
-  let modelList: CopilotModel[] = (await claude.listModels()).map((m) => ({
-    id: m.id,
-    displayName: m.displayName,
-    contextWindow: m.contextWindow ?? config.claude.contextWindow,
-    maxOutputTokens: m.maxOutputTokens,
-    efforts: m.supportedEfforts,
-  }));
+  const providers = activeProviders(config);
+  const listAll = async (): Promise<CopilotModel[]> =>
+    (
+      await Promise.all(
+        providers.map(async (p) =>
+          (await p.listModels()).map((m) => ({
+            id: m.id,
+            displayName: m.displayName,
+            contextWindow: m.contextWindow ?? p.settings.contextWindow,
+            maxOutputTokens: m.maxOutputTokens,
+            efforts: m.supportedEfforts,
+          })),
+        ),
+      )
+    ).flat();
+  let modelList = await listAll();
   if (!values["no-probe"]) {
     process.stdout.write("Probing each model for its real limits (one tiny turn each)...\n");
-    for (const m of modelList) {
-      const ok = await claude.probe(m.id).catch(() => false);
-      process.stdout.write(`  ${ok ? "ok  " : "FAIL"} ${m.id}\n`);
+    for (const p of providers) {
+      for (const m of (await p.listModels()).filter((x) => p.owns(x.id))) {
+        const ok = await p.probe(m.id).catch(() => false);
+        process.stdout.write(`  ${ok ? "ok  " : "FAIL"} ${m.id}\n`);
+      }
     }
-    const learned = new Map((await claude.listModels()).map((m) => [m.id, m]));
+    const learned = new Map((await listAll()).map((m) => [m.id, m]));
     modelList = modelList.map((m) => ({
       ...m,
       contextWindow: learned.get(m.id)?.contextWindow ?? m.contextWindow,
       maxOutputTokens: learned.get(m.id)?.maxOutputTokens ?? m.maxOutputTokens,
     }));
   }
-  await claude.close();
+  await Promise.all(providers.map((p) => p.close()));
   const lines = setupCopilot({
     dbPath: values.db ?? defaultCopilotDb,
     baseUrl,
@@ -141,49 +153,14 @@ async function setup(
 }
 
 async function models(config: Config) {
-  const list = await new ClaudeProvider(config.claude).listModels();
-  for (const m of list) process.stdout.write(`${m.id.padEnd(28)} ${m.displayName ?? ""}\n`);
+  const providers = activeProviders(config);
+  for (const p of providers) {
+    for (const m of await p.listModels()) {
+      process.stdout.write(`${m.id.padEnd(28)} ${(m.displayName ?? "").padEnd(24)} ${p.name}\n`);
+    }
+  }
+  await Promise.all(providers.map((p) => p.close()));
   process.exit(0);
-}
-
-const ok = (msg: string) => process.stdout.write(`  ok    ${msg}\n`);
-const bad = (msg: string) => process.stdout.write(`  FAIL  ${msg}\n`);
-
-async function doctor(config: Config) {
-  process.stdout.write(`conduit doctor\n`);
-  process.stdout.write(`  config: ${config.source ?? "(none, using defaults)"}\n`);
-  if (process.env.ANTHROPIC_API_KEY) {
-    process.stdout.write(
-      config.claude.stripApiKey
-        ? "  note  ANTHROPIC_API_KEY is set; conduit removes it so Claude Code uses your subscription\n"
-        : "  note  ANTHROPIC_API_KEY is set and strip_api_key=false; usage bills the API key\n",
-    );
-  }
-  const q = openProbe(config.claude);
-  try {
-    const account = await q.accountInfo();
-    const usesKey = account.apiKeySource !== undefined && account.apiKeySource !== "none";
-    const auth = usesKey
-      ? `API key (${account.apiKeySource}), billed to the API`
-      : account.subscriptionType
-        ? `subscription login (${account.subscriptionType})`
-        : `login (${account.tokenSource ?? "source unknown"})`;
-    ok(`Claude Code reachable; auth: ${auth}`);
-    const list = await q.supportedModels();
-    ok(
-      `models: ${list
-        .filter((m) => m.value !== "default")
-        .map((m) => m.resolvedModel ?? m.value)
-        .join(", ")}`,
-    );
-  } catch (error) {
-    bad(`could not talk to Claude Code: ${error instanceof Error ? error.message : String(error)}`);
-    process.stdout.write("        Run `claude` once and log in, or set providers.claude.binary.\n");
-    process.exitCode = 1;
-  } finally {
-    q.close();
-  }
-  process.exit();
 }
 
 function init() {

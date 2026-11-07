@@ -28,15 +28,20 @@ export function loader({ params, context }: Route.LoaderArgs) {
   const { registry } = context.get(conduitContext);
   const entry = registry.store.get(params.id);
   if (!entry) throw data("No such provider", { status: 404 });
+  const login =
+    entry.type === "codex"
+      ? { variable: "CODEX_HOME", command: "codex login", product: "Codex" }
+      : { variable: "CLAUDE_CONFIG_DIR", command: "claude /login", product: "Claude Code" };
   const command =
     entry.configDir === undefined
-      ? "claude /login"
-      : `CLAUDE_CONFIG_DIR=${shellQuote(entry.configDir)} claude /login`;
+      ? login.command
+      : `${login.variable}=${shellQuote(entry.configDir)} ${login.command}`;
   return {
     id: entry.id,
     name: entry.name,
     enabled: entry.enabled,
     configDir: entry.configDir,
+    product: login.product,
     command,
     usage: usageView(registry, entry.id),
   };
@@ -55,7 +60,7 @@ export async function action({ params, context }: Route.ActionArgs) {
 }
 
 export default function ProviderDetail({ loaderData }: Route.ComponentProps) {
-  const { id, name, configDir, command, usage } = loaderData;
+  const { id, name, configDir, product, command, usage } = loaderData;
   const navigation = useNavigation();
   const verifying = navigation.state === "submitting";
   return (
@@ -76,7 +81,7 @@ export default function ProviderDetail({ loaderData }: Route.ComponentProps) {
                   Login stored in <code className="font-mono">{configDir}</code>
                 </>
               ) : (
-                "Uses Claude Code's default login."
+                `Uses ${product}'s default login.`
               )}
             </CardDescription>
           </div>

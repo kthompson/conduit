@@ -6,14 +6,24 @@
 - [ ] `post_turn_summary`: Claude Code runs an internal step after each turn that delays a
       follow-up arriving within ~2s; find a way to turn it off
 - [ ] Map subscription rate-limit errors to HTTP 429 (non-streaming) and a clearer stream error
-- [ ] Web UI: usage history over time, per-provider model restrictions, Codex and Copilot provider types
+- [ ] Web UI: usage history over time, per-provider model restrictions, Copilot provider type
 - [ ] Build step for publishing (`node` won't strip types inside node_modules)
-- [ ] More providers (Codex, Grok) behind the same `Provider` interface
+- [ ] More providers (Copilot, Grok) behind the same `Provider` interface. Copilot's models also
+      exist on other providers (Claude and GPT ids), so `Provider.owns(model)` routing needs a
+      tie-break (an explicit prefix such as `copilot/gpt-5`, or a per-model route in config)
+- [ ] Codex: share one `app-server` process per login across conversations (today: one per
+      conversation, like Claude)
+- [ ] Codex: turn off `exec`/`wait` and the collaboration tools. They stay advertised to the model
+      (contained by an empty environment and a read-only sandbox), and no config key removes them
+- [ ] Codex: usage for a turn that ends in `tool_calls` reads 0; Codex reports tokens after the next model request, so the following turn carries them
 - [ ] Only if a client needs it: `/v1/responses` front end (Copilot's `wireApi: "responses"`)
 - [ ] Only if a client needs it: `/v1/messages` (Anthropic Messages) front end. Copilot also has
       an `anthropic` provider type, which would carry thinking and tool_use with full fidelity
 
 ## Done
+
+- [x] Codex provider (`codex app-server`), with Claude's session pool, matching, failover and
+      usage extracted into a shared core and models routed to the provider that owns them
 
 - [x] Capture Copilot Desktop traffic (`serve --capture`). Findings:
   - Only `POST /v1/chat/completions` and `GET /v1/models`; no `/v1/responses` or `/v1/messages`

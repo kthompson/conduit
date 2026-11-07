@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
   CallToolRequestSchema,
@@ -6,7 +5,8 @@ import {
   type CallToolResult,
 } from "@modelcontextprotocol/sdk/types.js";
 import type { FunctionTool } from "../../openai/types.ts";
-import type { ToolResultContent } from "./conversation.ts";
+import type { ToolResultContent } from "../conversation.ts";
+import { aliasFor as aliasForName, PendingToolCalls, type ToolResult } from "../pendingTools.ts";
 import { log } from "../../log.ts";
 
 export const BRIDGE_SERVER = "tools";
@@ -17,7 +17,8 @@ const MAX_TOOL_NAME = 64;
  * Exposes the client's function tools to Claude Code as an in-process MCP
  * server. Claude Code calls a tool as soon as its tool_use block is complete,
  * but the client only runs tools after the HTTP response ends, so each call
- * waits here until `deliver` hands over the client's result.
+ * waits in the shared pending-call table until `deliver` hands over the
+ * client's result.
  *
  * Calls are matched by the tool_use id Claude Code puts in the request's
  * `_meta["claudecode/toolUseId"]`, which is also the id the client sees.
@@ -26,8 +27,7 @@ export class ToolBridge {
   readonly server: McpServer;
   private readonly toClient = new Map<string, string>();
   private readonly toClaude = new Map<string, string>();
-  private readonly results = new Map<string, CallToolResult>();
-  private readonly waiters = new Map<string, (result: CallToolResult) => void>();
+  private readonly pending = new PendingToolCalls();
 
   constructor(tools: FunctionTool[]) {
     for (const tool of tools) {
@@ -53,7 +53,7 @@ export class ToolBridge {
         log.warn("claude tool call without a tool_use id", { tool: request.params.name });
         return errorResult("conduit could not match this tool call to the client.");
       }
-      return this.wait(id, extra.signal);
+      return toCallToolResult(await this.pending.wait(id, extra.signal));
     });
   }
 
@@ -69,52 +69,17 @@ export class ToolBridge {
   }
 
   deliver(toolUseId: string, content: ToolResultContent[]): void {
-    const result: CallToolResult = { content };
-    const waiter = this.waiters.get(toolUseId);
-    if (waiter) {
-      this.waiters.delete(toolUseId);
-      waiter(result);
-    } else {
-      this.results.set(toolUseId, result);
-    }
+    this.pending.deliver(toolUseId, content);
   }
 
   /** Ends every waiting call, e.g. when the session closes. */
   cancelAll(reason: string): void {
-    for (const [id, waiter] of this.waiters) {
-      this.waiters.delete(id);
-      waiter(errorResult(reason));
-    }
-    this.results.clear();
-  }
-
-  private wait(id: string, signal: AbortSignal): Promise<CallToolResult> {
-    const ready = this.results.get(id);
-    if (ready) {
-      this.results.delete(id);
-      return Promise.resolve(ready);
-    }
-    return new Promise((resolve) => {
-      this.waiters.set(id, resolve);
-      signal.addEventListener(
-        "abort",
-        () => {
-          if (this.waiters.get(id) === resolve) {
-            this.waiters.delete(id);
-            resolve(errorResult("Tool call was cancelled."));
-          }
-        },
-        { once: true },
-      );
-    });
+    this.pending.cancelAll(reason);
   }
 }
 
 function aliasFor(name: string): string {
-  const safe = name.replaceAll(/[^a-zA-Z0-9_-]/g, "_");
-  if (PREFIX.length + safe.length <= MAX_TOOL_NAME) return safe;
-  const digest = createHash("sha256").update(name).digest("hex").slice(0, 8);
-  return `${safe.slice(0, MAX_TOOL_NAME - PREFIX.length - 9)}_${digest}`;
+  return aliasForName(name, PREFIX.length, MAX_TOOL_NAME);
 }
 
 function normalizeSchema(parameters: Record<string, unknown> | undefined): {
@@ -127,4 +92,8 @@ function normalizeSchema(parameters: Record<string, unknown> | undefined): {
 
 function errorResult(message: string): CallToolResult {
   return { content: [{ type: "text", text: message }], isError: true };
+}
+
+function toCallToolResult(result: ToolResult): CallToolResult {
+  return result.isError ? { content: result.content, isError: true } : { content: result.content };
 }

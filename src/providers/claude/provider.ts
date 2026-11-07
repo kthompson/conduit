@@ -2,54 +2,39 @@ import type { ModelInfo } from "@anthropic-ai/claude-agent-sdk";
 import type { ClaudeConfig } from "../../config.ts";
 import { Trace, type TraceRecord } from "../../capture/recorder.ts";
 import { log } from "../../log.ts";
-import { textOf, type ChatMessage } from "../../openai/types.ts";
+import { ConversationProvider, type NewSessionArgs } from "../conversationProvider.ts";
 import type { ProviderRegistry } from "../registry.ts";
-import type { ModelEntry, Provider, TurnEvent, TurnInput } from "../types.ts";
-import {
-  fingerprint,
-  sessionKey,
-  splitSystem,
-  toToolResultContent,
-  toUserBlocks,
-  type ToolResultContent,
-  type UserBlock,
-} from "./conversation.ts";
+import type { ModelEntry, ProviderSettings } from "../types.ts";
 import { knownLimits } from "./limits.ts";
 import { probeModels } from "./probe.ts";
 import { ClaudeSession } from "./session.ts";
 
 const MODEL_CACHE_MS = 10 * 60 * 1000;
 const FALLBACK_MODELS = ["opus", "sonnet", "haiku"];
+/** Ids and aliases Claude Code accepts. */
+const CLAUDE_MODEL = /^(claude-|opus|sonnet|haiku|fable)/;
 
-/** The parts of a live session that decide whether a request continues it. */
-export interface SessionLike {
-  key: string;
-  state: ClaudeSession["state"];
-  lastUsed: number;
-  transcript: readonly string[];
-  pendingToolIds: readonly string[];
-}
-
-export type Match<S> =
-  | { kind: "tools"; session: S; results: Array<{ id: string; content: ToolResultContent[] }> }
-  | { kind: "user"; session: S; blocks: UserBlock[] }
-  | { kind: "none" };
-
-export class ClaudeProvider implements Provider {
+export class ClaudeProvider extends ConversationProvider<ClaudeSession> {
   readonly name = "claude";
-  private readonly config: ClaudeConfig;
-  private readonly registry: ProviderRegistry | undefined;
-  private readonly sessions = new Set<ClaudeSession>();
-  private readonly reaper: NodeJS.Timeout;
+  protected readonly type = "claude" as const;
+  protected readonly agent: ClaudeConfig;
+  readonly settings: ProviderSettings;
   private readonly limits = new Map<string, { contextWindow: number; maxOutputTokens: number }>();
   private models: { at: number; list: ModelInfo[] } | undefined;
 
   /** With a registry, new conversations are routed across its providers by priority. */
   constructor(config: ClaudeConfig, registry?: ProviderRegistry) {
-    this.config = config;
-    this.registry = registry;
-    this.reaper = setInterval(() => this.reapIdle(), 30_000);
-    this.reaper.unref();
+    super(registry);
+    this.agent = config;
+    this.settings = {
+      effort: config.effort,
+      reasoning: config.reasoning,
+      contextWindow: config.contextWindow,
+    };
+  }
+
+  owns(model: string): boolean {
+    return CLAUDE_MODEL.test(model);
   }
 
   /** Matches usage keys like "claude-opus-4-5-20251101" or "claude-opus-4-5[1m]" to the ids we list. */
@@ -101,164 +86,29 @@ export class ClaudeProvider implements Provider {
     return !failed;
   }
 
-  async *turn(input: TurnInput): AsyncIterable<TurnEvent> {
-    const failed = new Set<string>();
-    for (;;) {
-      let started: ReturnType<ClaudeProvider["startTurn"]>;
-      try {
-        started = this.startTurn(input, failed);
-      } catch (error) {
-        yield { type: "error", message: error instanceof Error ? error.message : String(error) };
-        return;
-      }
-      const { providerId, events } = started;
-      const iterator = events[Symbol.asyncIterator]();
-      let current = await iterator.next();
-      const first = current.done ? undefined : current.value;
-      if (first?.type === "error" && first.failure && this.registry) {
-        // Nothing has reached the client yet, so another provider can take over.
-        const { kind, resetsAt } = first.failure;
-        this.registry.markFailed(providerId, kind, first.message, resetsAt);
-        failed.add(providerId);
-        if (this.registry.pick(failed)) {
-          log.info("retrying on the next provider", { failed: providerId, reason: kind });
-          continue;
-        }
-      }
-      while (!current.done) {
-        if (current.value.type === "done") this.recordUsage(providerId, current.value);
-        yield current.value;
-        current = await iterator.next();
-      }
-      return;
-    }
-  }
-
-  private recordUsage(providerId: string, done: Extract<TurnEvent, { type: "done" }>): void {
-    const u = done.usage;
-    this.registry?.recordTurn(
-      providerId,
-      u
-        ? {
-            prompt: u.prompt_tokens,
-            completion: u.completion_tokens,
-            cached: u.prompt_tokens_details?.cached_tokens ?? 0,
-          }
-        : undefined,
-    );
-  }
-
-  /**
-   * Finds or starts the session for a request. Matching and starting happen with
-   * no await in between, so two concurrent requests can never claim the same session.
-   */
-  private startTurn(
-    input: TurnInput,
-    failed: ReadonlySet<string>,
-  ): { providerId: string; events: AsyncIterable<TurnEvent> } {
-    const { request } = input;
-    const { system, conversation } = splitSystem(request.messages);
-    const tools = (request.tools ?? []).filter((t) => t.type === "function");
-    const key = sessionKey({ system, tools, model: input.upstreamModel, effort: input.effort });
-    const prints = conversation.map(fingerprint);
-
-    const usable = [...this.sessions].filter(
-      (s) => !failed.has(s.providerId) && this.registry?.store.get(s.providerId)?.enabled !== false,
-    );
-    const match = matchSession(usable, key, conversation, prints);
-    if (match.kind === "tools") {
-      input.trace.note("matched live session awaiting tool results", { session: match.session.id });
-      return {
-        providerId: match.session.providerId,
-        events: match.session.sendToolResults(
-          match.results,
-          prints.slice(match.session.transcript.length),
-          input.trace,
-          input.signal,
-        ),
-      };
-    }
-    if (match.kind === "user") {
-      input.trace.note("matched idle live session", { session: match.session.id });
-      return {
-        providerId: match.session.providerId,
-        events: match.session.sendUser(
-          match.blocks,
-          prints.slice(match.session.transcript.length),
-          input.trace,
-          input.signal,
-        ),
-      };
-    }
-
-    const chosen = this.registry ? this.registry.pick(failed) : undefined;
-    if (this.registry && !chosen) {
-      throw new Error("No provider is available: every provider is disabled or logged out.");
-    }
-    const providerId = chosen?.id ?? "default";
-    const config = chosen && this.registry ? this.registry.claudeConfig(chosen) : this.config;
-    this.evictForNewSession();
-    const { history, blocks } = coldStart(conversation);
-    const session = new ClaudeSession(
+  protected createSession(args: NewSessionArgs<ClaudeSession>): ClaudeSession {
+    const config =
+      args.entry && this.registry ? this.registry.claudeConfig(args.entry) : this.agent;
+    return new ClaudeSession(
       {
-        key,
-        providerId,
-        model: input.upstreamModel,
-        effort: input.effort,
-        system,
-        tools,
-        history,
+        key: args.key,
+        providerId: args.providerId,
+        model: args.model,
+        effort: args.effort,
+        system: args.system,
+        tools: args.tools,
+        history: args.history,
         config,
         onLimits: (m, l) => this.recordLimits(m, l),
       },
-      (s) => this.sessions.delete(s),
+      args.onClose,
     );
-    this.sessions.add(session);
-    input.trace.note("started new claude session", {
-      session: session.id,
-      provider: providerId,
-      historyMessages: conversation.length,
-      liveSessions: this.sessions.size,
-    });
-    log.info("new claude session", {
-      session: session.id,
-      provider: providerId,
-      model: input.upstreamModel,
-      history: conversation.length,
-    });
-    return { providerId, events: session.sendUser(blocks, prints, input.trace, input.signal) };
-  }
-
-  async close(): Promise<void> {
-    clearInterval(this.reaper);
-    for (const s of this.sessions) s.close("server shutting down");
   }
 
   /** Models come from the highest-priority enabled login. */
   private modelsConfig(): ClaudeConfig {
-    const first = this.registry?.store.enabled()[0];
-    return first && this.registry ? this.registry.claudeConfig(first) : this.config;
-  }
-
-  private evictForNewSession(): void {
-    if (this.sessions.size < this.config.maxSessions) return;
-    const idle = [...this.sessions]
-      .filter((s) => s.state !== "busy")
-      .toSorted((a, b) => a.lastUsed - b.lastUsed);
-    const oldest = idle[0];
-    if (oldest) oldest.close("evicted for a new session");
-    else {
-      log.warn("all claude sessions are busy; exceeding max_sessions", {
-        max: this.config.maxSessions,
-      });
-    }
-  }
-
-  private reapIdle(): void {
-    const cutoff = Date.now() - this.config.sessionIdleSeconds * 1000;
-    for (const s of this.sessions) {
-      if (s.state !== "busy" && s.lastUsed < cutoff) s.close("idle timeout");
-    }
+    const first = this.registry?.store.enabled("claude")[0];
+    return first && this.registry ? this.registry.claudeConfig(first) : this.agent;
   }
 
   private async supportedModels(): Promise<ModelInfo[]> {
@@ -272,84 +122,4 @@ export class ClaudeProvider implements Provider {
       return FALLBACK_MODELS.map((value) => ({ value, displayName: value, description: "" }));
     }
   }
-}
-
-/**
- * Finds the live session a request continues: its history must extend what
- * the session has seen, followed either by results for the session's pending
- * tool calls or by new user content.
- */
-export function matchSession<S extends SessionLike>(
-  sessions: Iterable<S>,
-  key: string,
-  conversation: ChatMessage[],
-  prints: string[],
-): Match<S> {
-  const candidates = [...sessions]
-    .filter((s) => s.key === key && (s.state === "idle" || s.state === "awaiting_tools"))
-    .toSorted((a, b) => b.lastUsed - a.lastUsed);
-
-  for (const session of candidates) {
-    const seen = session.transcript;
-    if (prints.length <= seen.length) continue;
-    if (!seen.every((p, i) => p === prints[i])) continue;
-    const rest = conversation.slice(seen.length);
-
-    if (session.state === "awaiting_tools") {
-      const results: Array<{ id: string; content: ToolResultContent[] }> = [];
-      let i = 0;
-      for (const m of rest) {
-        if (m.role !== "tool") break;
-        i++;
-        results.push({ id: m.tool_call_id, content: toToolResultContent(m.content) });
-      }
-      if (results.length === 0) continue;
-      if (!results.every((r) => session.pendingToolIds.includes(r.id))) continue;
-      const after = rest.slice(i);
-      if (!after.every(isUserLike)) continue;
-      // Content the client adds after tool results rides along with the last result.
-      const extra = after.flatMap(userLikeBlocks).map(blockToResult);
-      results.at(-1)?.content.push(...extra);
-      return { kind: "tools", session, results };
-    }
-
-    if (rest.every(isUserLike)) {
-      return { kind: "user", session, blocks: rest.flatMap(userLikeBlocks) };
-    }
-  }
-  return { kind: "none" };
-}
-
-function isUserLike(m: ChatMessage): boolean {
-  return m.role === "user" || m.role === "system" || m.role === "developer";
-}
-
-function userLikeBlocks(m: ChatMessage): UserBlock[] {
-  if (m.role === "user") return toUserBlocks(m.content);
-  return [{ type: "text", text: `[system]\n${textOf(m.content)}` }];
-}
-
-function blockToResult(block: UserBlock): ToolResultContent {
-  if (block.type === "text") return block;
-  if (block.source.type === "base64") {
-    return { type: "image", data: block.source.data, mimeType: block.source.media_type };
-  }
-  return { type: "text", text: `[image: ${block.source.url}]` };
-}
-
-/**
- * Splits a new session's request into the history to resume as real turns and
- * the trailing user message(s) that start the first turn.
- */
-export function coldStart(conversation: ChatMessage[]): {
-  history: ChatMessage[];
-  blocks: UserBlock[];
-} {
-  let tail = conversation.length;
-  while (tail > 0 && isUserLike(conversation.at(tail - 1) as ChatMessage)) tail--;
-  const history = conversation.slice(0, tail);
-  const latest = conversation.slice(tail);
-  const blocks = latest.flatMap(userLikeBlocks);
-  if (blocks.length === 0) blocks.push({ type: "text", text: "Continue." });
-  return { history, blocks };
 }
