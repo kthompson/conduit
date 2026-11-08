@@ -46,8 +46,6 @@ export interface ClaudeConfig {
 export interface UiConfig {
   /** Serve the web UI at /ui. */
   enabled: boolean;
-  /** Run the Vite dev server (HMR, DevTools) instead of the built UI. Set by `--ui-dev`. */
-  dev: boolean;
   /** Extra Host header names the UI answers to; localhost and server.host are always allowed. "*" allows any. */
   allowedHosts: string[];
   /** Send the Content-Security-Policy as report-only. */
@@ -78,7 +76,7 @@ export const userConfigPath = path.join(
 export function defaultConfig(): Config {
   return {
     server: { host: "127.0.0.1", port: 4100, apiKey: undefined },
-    ui: { enabled: true, dev: false, allowedHosts: [], cspReportOnly: false },
+    ui: { enabled: true, allowedHosts: [], cspReportOnly: false },
     capture: { enabled: false, dir: path.join(stateDir, "captures") },
     defaultProvider: "claude",
     claude: {

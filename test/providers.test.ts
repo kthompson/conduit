@@ -102,9 +102,28 @@ test("a corrupt file is reported, not silently replaced", () => {
   const dir = tmp();
   storeIn(dir).add({ type: "claude", name: "A", configDir: path.join(dir, "a") });
   const file = path.join(dir, "providers.json");
-  const bad = JSON.stringify({ version: 1, providers: [{ id: "x", type: "nope" }] });
+  const bad = JSON.stringify({ version: 1, providers: [{ id: "x", type: "claude" }] });
   writeFileSync(file, bad);
   assert.throws(() => new ProviderStore(file));
+});
+
+test("entries of unknown provider types are ignored but preserved on save", () => {
+  const dir = tmp();
+  const file = path.join(dir, "providers.json");
+  const codex = { id: "codex", type: "codex", name: "codex", enabled: true, configDir: "/x" };
+  writeFileSync(file, JSON.stringify({ version: 1, providers: [codex] }));
+  const store = new ProviderStore(file);
+  assert.deepEqual(
+    store.list().map((e) => e.id),
+    [DEFAULT_PROVIDER_ID],
+  );
+  store.add({ type: "claude", name: "B", configDir: path.join(dir, "b") });
+  const saved = JSON.parse(readFileSync(file, "utf8")) as { providers: { id: string }[] };
+  assert.deepEqual(
+    saved.providers.map((e) => e.id),
+    [DEFAULT_PROVIDER_ID, "b", "codex"],
+  );
+  assert.deepEqual(saved.providers[2], codex);
 });
 
 function registryWith(names: string[], now: () => number = Date.now) {

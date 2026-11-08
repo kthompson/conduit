@@ -12,7 +12,7 @@ port = 4100
 
 [ui]
 # Web UI at http://127.0.0.1:4100/ui/ : list providers, see usage, add logins, set priority.
-# Needs `pnpm build:ui` once (or start with `conduit serve --ui-dev`).
+# Served by the Vite dev server (HMR, DevTools), so run `pnpm install` first.
 enabled = true
 # Extra Host names the UI answers to (localhost and server.host always work). Guards against DNS rebinding.
 # allowed_hosts = ["conduit.example.com"]

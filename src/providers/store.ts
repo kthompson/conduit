@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import path from "node:path";
 import { z } from "zod";
 import { expandHome, stateDir, userConfigPath } from "../config.ts";
+import { log } from "../log.ts";
 
 export const DEFAULT_PROVIDER_ID = "default";
 
@@ -27,7 +28,7 @@ export const providerTypes: ProviderType[] = ["claude"];
 const fileSchema = z.object({
   version: z.literal(1),
   /** Priority order: earlier entries are tried first. */
-  providers: z.array(providerEntrySchema),
+  providers: z.array(z.unknown()),
 });
 
 /** A new or renamed provider clashes with an existing one. */
@@ -69,6 +70,8 @@ export function defaultConfigDir(name: string): string {
 export class ProviderStore {
   private readonly file: string;
   private entries: ProviderEntry[];
+  /** Entries of provider types this build doesn't know; kept verbatim so saving doesn't drop them. */
+  private foreign: unknown[] = [];
 
   constructor(file: string = defaultStorePath) {
     this.file = file;
@@ -167,13 +170,28 @@ export class ProviderStore {
   }
 
   private load(): ProviderEntry[] {
-    let entries: ProviderEntry[] = [];
+    const entries: ProviderEntry[] = [];
     if (existsSync(this.file)) {
       const parsed = fileSchema.safeParse(JSON.parse(readFileSync(this.file, "utf8")));
       if (!parsed.success) {
         throw new Error(`${this.file}: ${z.prettifyError(parsed.error)}`);
       }
-      entries = parsed.data.providers;
+      for (const [index, raw] of parsed.data.providers.entries()) {
+        const entry = providerEntrySchema.safeParse(raw);
+        if (entry.success) {
+          entries.push(entry.data);
+          continue;
+        }
+        const type = (raw as { type?: unknown } | null)?.type;
+        if (typeof type === "string" && !(providerTypes as string[]).includes(type)) {
+          log.warn("ignoring provider of unknown type", { file: this.file, index, type });
+          this.foreign.push(raw);
+          continue;
+        }
+        throw new Error(
+          `${this.file}: ${z.prettifyError(entry.error)}\n  → at providers[${String(index)}]`,
+        );
+      }
     }
     if (!entries.some((e) => e.id === DEFAULT_PROVIDER_ID)) {
       entries.unshift({
@@ -189,9 +207,13 @@ export class ProviderStore {
   private save(): void {
     mkdirSync(path.dirname(this.file), { recursive: true });
     const tmp = `${this.file}.${process.pid}.tmp`;
-    writeFileSync(tmp, JSON.stringify({ version: 1, providers: this.entries }, null, 2) + "\n", {
-      mode: 0o600,
-    });
+    writeFileSync(
+      tmp,
+      JSON.stringify({ version: 1, providers: [...this.entries, ...this.foreign] }, null, 2) + "\n",
+      {
+        mode: 0o600,
+      },
+    );
     renameSync(tmp, this.file);
   }
 }

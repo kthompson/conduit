@@ -7,7 +7,6 @@ import type { UiMount } from "./server.ts";
 
 const uiRoot = new URL("../ui/", import.meta.url);
 const serverEntry = new URL("server/index.ts", uiRoot);
-const builtServer = new URL("build/server/index.js", uiRoot);
 
 interface UiModule {
   createUiHandle(options: {
@@ -39,16 +38,12 @@ export async function loadUi(
     log.warn("web UI not found; skipping", { path: fileURLToPath(serverEntry) });
     return undefined;
   }
-  if (!config.ui.dev && !existsSync(builtServer)) {
-    log.warn("web UI is not built; run `pnpm build:ui`, or start with --ui-dev");
-    return undefined;
-  }
   try {
     const mod = (await import(serverEntry.href)) as UiModule;
     return await mod.createUiHandle({
       registry,
       apiKey: config.server.apiKey,
-      dev: config.ui.dev,
+      dev: true,
       cspReportOnly: config.ui.cspReportOnly,
       allowedHosts: allowedHosts(config),
     });
