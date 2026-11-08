@@ -17,9 +17,7 @@
     "lint": "oxlint",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
-    "build:ui": "pnpm --filter @conduit/ui build",
-    "check": "pnpm format:check && pnpm typegen && pnpm lint && pnpm typecheck && pnpm build:ui && pnpm test && pnpm primitives:check",
-    "dev:ui": "node src/cli.ts serve --ui-dev"
+    "check": "pnpm format:check && pnpm typegen && pnpm lint && pnpm typecheck && pnpm test && pnpm primitives:check"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.310",

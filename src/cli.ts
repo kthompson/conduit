@@ -31,7 +31,6 @@ Options:
   -H, --host <addr>        Address to bind
       --provider <name>    Default provider: claude or mock (capture defaults to mock)
       --capture [dir]      Record requests, responses and upstream events as JSON
-      --ui-dev             Serve the web UI from the Vite dev server (HMR, DevTools)
       --no-ui              Do not serve the web UI
   -v, --verbose            Debug logging
   -h, --help               Show this help
@@ -46,7 +45,6 @@ async function main() {
       host: { type: "string", short: "H" },
       provider: { type: "string" },
       capture: { type: "string" },
-      "ui-dev": { type: "boolean" },
       "no-ui": { type: "boolean" },
       verbose: { type: "boolean", short: "v" },
       help: { type: "boolean", short: "h" },
@@ -73,7 +71,6 @@ async function main() {
   if (values.port) config.server.port = Number(values.port);
   if (values.host) config.server.host = values.host;
   if (values.provider) config.defaultProvider = values.provider as ProviderName;
-  if (values["ui-dev"]) config.ui.dev = true;
   if (values["no-ui"]) config.ui.enabled = false;
   if (values.capture !== undefined) {
     config.capture.enabled = true;

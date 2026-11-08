@@ -106,7 +106,6 @@ rate limited or logged out. If a provider fails that way before answering, condu
 stays on the provider it started on. Your existing login is always there as "Default login".
 
 ```bash
-pnpm build:ui                 # once; or run `conduit serve --ui-dev` for hot reload
 node src/cli.ts serve         # UI at http://127.0.0.1:4100/ui/
 ```
 
