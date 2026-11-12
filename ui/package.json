@@ -9,7 +9,8 @@
   "scripts": {
     "build": "react-router build",
     "dev": "react-router dev",
-    "typecheck": "react-router typegen && tsc --noEmit"
+    "typegen": "react-router typegen",
+    "typecheck": "pnpm typegen && tsc --noEmit"
   },
   "dependencies": {
     "@conform-to/react": "^1.21.3",

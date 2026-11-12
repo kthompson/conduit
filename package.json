@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "node src/cli.ts serve",
     "capture": "node src/cli.ts capture",
+    "typegen": "pnpm --filter @conduit/ui typegen",
     "typecheck": "tsc --noEmit && pnpm --filter @conduit/ui typecheck",
     "primitives:check": "node .agents/skills/visual-recap/scripts/check-primitives-map.ts",
     "test": "node --test test/*.test.ts",
@@ -17,6 +18,7 @@
     "format": "oxfmt",
     "format:check": "oxfmt --check",
     "build:ui": "pnpm --filter @conduit/ui build",
+    "check": "pnpm format:check && pnpm typegen && pnpm lint && pnpm typecheck && pnpm build:ui && pnpm test && pnpm primitives:check",
     "dev:ui": "node src/cli.ts serve --ui-dev"
   },
   "dependencies": {
