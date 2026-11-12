@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { parse } from "smol-toml";
 
-export type ProviderName = "claude" | "mock";
+export type ProviderName = "claude" | "codex" | "mock";
 export type ReasoningOutput = "reasoning_content" | "think_tags" | "none";
 
 export interface ServerConfig {
@@ -18,29 +18,40 @@ export interface CaptureConfig {
   dir: string;
 }
 
-export interface ClaudeConfig {
-  /** Path to a `claude` binary. Unset uses the binary bundled with the Agent SDK. */
+/** Settings shared by every provider that keeps a live agent process per conversation. */
+export interface AgentConfig {
+  /** Path to the provider's CLI binary. Unset uses the one on PATH (Claude: the SDK's bundled one). */
   binary: string | undefined;
-  /** Working directory for the Claude Code process. */
+  /** Working directory for the agent process. */
   cwd: string;
+  /** Seconds a live session may sit unused before its process is closed. */
+  sessionIdleSeconds: number;
+  /** Maximum live sessions (agent processes) kept at once. */
+  maxSessions: number;
+  /** Seconds the model waits for the client to return a tool result. */
+  toolTimeoutSeconds: number;
+  /** Default effort when the request does not carry `reasoning_effort`. */
+  effort: string | undefined;
+  /** Context window (tokens) advertised in /v1/models until a live turn reports the real one. */
+  contextWindow: number | undefined;
+  /** How the model's thinking is surfaced in chat completion output. */
+  reasoning: ReasoningOutput;
+  /** Extra environment variables for the agent process. */
+  env: Record<string, string>;
+}
+
+export interface ClaudeConfig extends AgentConfig {
   /** Claude Code settings layers to load. Empty keeps the model isolated from user/project config. */
   settingSources: Array<"user" | "project" | "local">;
   /** Drop ANTHROPIC_API_KEY from the child env so Claude Code uses the subscription login. */
   stripApiKey: boolean;
-  /** Seconds a live session may sit unused before its process is closed. */
-  sessionIdleSeconds: number;
-  /** Maximum live sessions (Claude Code processes) kept at once. */
-  maxSessions: number;
-  /** Seconds Claude waits for the client to return a tool result. */
-  toolTimeoutSeconds: number;
-  /** Default effort when the request does not carry `reasoning_effort`. */
-  effort: string | undefined;
-  /** Context window (tokens) advertised in /v1/models for Claude models. */
-  contextWindow: number | undefined;
-  /** How Claude's thinking is surfaced in chat completion output. */
-  reasoning: ReasoningOutput;
-  /** Extra environment variables for the Claude Code process. */
-  env: Record<string, string>;
+}
+
+export interface CodexConfig extends AgentConfig {
+  /** Drop OPENAI_API_KEY from the child env so Codex uses the ChatGPT login. */
+  stripApiKey: boolean;
+  /** Milliseconds to wait for more parallel tool calls before handing the batch to the client. */
+  toolSettleMs: number;
 }
 
 export interface UiConfig {
@@ -58,6 +69,7 @@ export interface Config {
   capture: CaptureConfig;
   defaultProvider: ProviderName;
   claude: ClaudeConfig;
+  codex: CodexConfig;
   /** File the config was read from, if any. */
   source: string | undefined;
 }
@@ -90,6 +102,19 @@ export function defaultConfig(): Config {
       effort: undefined,
       contextWindow: 200_000,
       reasoning: "reasoning_content",
+      env: {},
+    },
+    codex: {
+      binary: undefined,
+      cwd: process.cwd(),
+      stripApiKey: true,
+      sessionIdleSeconds: 900,
+      maxSessions: 8,
+      toolTimeoutSeconds: 3600,
+      effort: undefined,
+      contextWindow: 272_000,
+      reasoning: "reasoning_content",
+      toolSettleMs: 150,
       env: {},
     },
     source: undefined,
@@ -150,13 +175,11 @@ function applyToml(config: Config, raw: Record<string, unknown>, file: string): 
   const provider = str(raw.default_provider, where("default_provider"));
   if (provider) config.defaultProvider = providerName(provider, where("default_provider"));
 
-  const claude = table(table(raw.providers, where("providers"))?.claude, where("providers.claude"));
+  const providers = table(raw.providers, where("providers"));
+  const claude = table(providers?.claude, where("providers.claude"));
   if (claude) {
     const c = config.claude;
-    const binary = nonEmpty(str(claude.binary, where("providers.claude.binary")));
-    c.binary = binary === undefined ? undefined : expandHome(binary);
-    const cwd = nonEmpty(str(claude.cwd, where("providers.claude.cwd")));
-    if (cwd) c.cwd = path.resolve(expandHome(cwd));
+    applyAgentToml(c, claude, "providers.claude", where);
     if (claude.setting_sources !== undefined) {
       const sources = strList(claude.setting_sources, where("providers.claude.setting_sources"));
       for (const s of sources) {
@@ -168,36 +191,54 @@ function applyToml(config: Config, raw: Record<string, unknown>, file: string): 
     }
     c.stripApiKey =
       bool(claude.strip_api_key, where("providers.claude.strip_api_key")) ?? c.stripApiKey;
-    c.sessionIdleSeconds =
-      num(claude.session_idle_seconds, where("providers.claude.session_idle_seconds")) ??
-      c.sessionIdleSeconds;
-    c.maxSessions =
-      num(claude.max_sessions, where("providers.claude.max_sessions")) ?? c.maxSessions;
-    c.toolTimeoutSeconds =
-      num(claude.tool_timeout_seconds, where("providers.claude.tool_timeout_seconds")) ??
-      c.toolTimeoutSeconds;
-    c.effort = nonEmpty(str(claude.effort, where("providers.claude.effort")));
-    c.contextWindow =
-      num(claude.context_window, where("providers.claude.context_window")) ?? c.contextWindow;
-    const reasoning = str(claude.reasoning, where("providers.claude.reasoning"));
-    if (reasoning !== undefined) {
-      if (reasoning !== "reasoning_content" && reasoning !== "think_tags" && reasoning !== "none") {
-        throw new Error(
-          `${where("providers.claude.reasoning")}: expected reasoning_content, think_tags or none`,
-        );
-      }
-      c.reasoning = reasoning;
+  }
+
+  const codex = table(providers?.codex, where("providers.codex"));
+  if (codex) {
+    const c = config.codex;
+    applyAgentToml(c, codex, "providers.codex", where);
+    c.stripApiKey =
+      bool(codex.strip_api_key, where("providers.codex.strip_api_key")) ?? c.stripApiKey;
+    c.toolSettleMs =
+      num(codex.tool_settle_ms, where("providers.codex.tool_settle_ms")) ?? c.toolSettleMs;
+  }
+}
+
+/** The keys every agent provider table shares. */
+function applyAgentToml(
+  c: AgentConfig,
+  raw: Record<string, unknown>,
+  prefix: string,
+  where: (key: string) => string,
+): void {
+  const key = (name: string) => where(`${prefix}.${name}`);
+  const binary = nonEmpty(str(raw.binary, key("binary")));
+  c.binary = binary === undefined ? undefined : expandHome(binary);
+  const cwd = nonEmpty(str(raw.cwd, key("cwd")));
+  if (cwd) c.cwd = path.resolve(expandHome(cwd));
+  c.sessionIdleSeconds =
+    num(raw.session_idle_seconds, key("session_idle_seconds")) ?? c.sessionIdleSeconds;
+  c.maxSessions = num(raw.max_sessions, key("max_sessions")) ?? c.maxSessions;
+  c.toolTimeoutSeconds =
+    num(raw.tool_timeout_seconds, key("tool_timeout_seconds")) ?? c.toolTimeoutSeconds;
+  c.effort = nonEmpty(str(raw.effort, key("effort")));
+  c.contextWindow = num(raw.context_window, key("context_window")) ?? c.contextWindow;
+  const reasoning = str(raw.reasoning, key("reasoning"));
+  if (reasoning !== undefined) {
+    if (reasoning !== "reasoning_content" && reasoning !== "think_tags" && reasoning !== "none") {
+      throw new Error(`${key("reasoning")}: expected reasoning_content, think_tags or none`);
     }
-    const env = table(claude.env, where("providers.claude.env"));
-    if (env) {
-      for (const [k, v] of Object.entries(env)) c.env[k] = String(v);
-    }
+    c.reasoning = reasoning;
+  }
+  const env = table(raw.env, key("env"));
+  if (env) {
+    for (const [k, v] of Object.entries(env)) c.env[k] = String(v);
   }
 }
 
 function providerName(value: string, where: string): ProviderName {
-  if (value === "claude" || value === "mock") return value;
-  throw new Error(`${where}: unknown provider "${value}" (expected claude or mock)`);
+  if (value === "claude" || value === "codex" || value === "mock") return value;
+  throw new Error(`${where}: unknown provider "${value}" (expected claude, codex or mock)`);
 }
 
 function table(value: unknown, where: string): Record<string, unknown> | undefined {

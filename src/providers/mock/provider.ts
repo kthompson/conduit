@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { setTimeout as sleep } from "node:timers/promises";
 import { textOf, type ChatCompletionRequest } from "../../openai/types.ts";
-import type { ModelEntry, Provider, TurnEvent, TurnInput } from "../types.ts";
+import type { ModelEntry, Provider, ProviderSettings, TurnEvent, TurnInput } from "../types.ts";
 
 const TOOL_COMMAND = /^\/tool\s+(\S+)(?:\s+([\s\S]+))?$/m;
 
@@ -12,10 +12,21 @@ const TOOL_COMMAND = /^\/tool\s+(\S+)(?:\s+([\s\S]+))?$/m;
  */
 export class MockProvider implements Provider {
   readonly name = "mock";
+  readonly settings: ProviderSettings;
   private readonly delayMs: number;
 
-  constructor(options: { delayMs?: number } = {}) {
+  constructor(options: { delayMs?: number; settings?: Partial<ProviderSettings> } = {}) {
     this.delayMs = options.delayMs ?? 15;
+    this.settings = {
+      effort: undefined,
+      reasoning: "reasoning_content",
+      contextWindow: undefined,
+      ...options.settings,
+    };
+  }
+
+  owns(model: string): boolean {
+    return model === "mock";
   }
 
   async listModels(): Promise<ModelEntry[]> {

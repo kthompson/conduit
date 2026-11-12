@@ -31,7 +31,7 @@ export interface ProviderView {
   type: string;
   enabled: boolean;
   isDefault: boolean;
-  /** 1 is tried first. */
+  /** 1 is tried first, among providers of the same type. */
   priority: number;
   isLast: boolean;
   configDir: string | undefined;
@@ -43,14 +43,16 @@ export interface ProviderView {
 
 export function toView(statuses: ProviderStatus[]): ProviderView[] {
   const now = Date.now();
-  return statuses.map((s, index) => ({
+  // Priority only matters between logins of one provider type: a Claude login never stands in for Codex.
+  const ofType = (type: string) => statuses.filter((s) => s.entry.type === type);
+  return statuses.map((s) => ({
     id: s.entry.id,
     name: s.entry.name,
     type: s.entry.type,
     enabled: s.entry.enabled,
     isDefault: s.entry.id === "default",
-    priority: index + 1,
-    isLast: index === statuses.length - 1,
+    priority: ofType(s.entry.type).indexOf(s) + 1,
+    isLast: ofType(s.entry.type).at(-1) === s,
     configDir: s.entry.configDir,
     health: s.health,
     detail: s.detail,

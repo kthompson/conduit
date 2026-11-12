@@ -8,8 +8,8 @@ import {
   splitSystem,
   toToolResultContent,
   toUserBlocks,
-} from "../src/providers/claude/conversation.ts";
-import { coldStart, matchSession, type SessionLike } from "../src/providers/claude/provider.ts";
+} from "../src/providers/conversation.ts";
+import { coldStart, matchSession, type SessionLike } from "../src/providers/matching.ts";
 
 const user = (content: string): ChatMessage => ({ role: "user", content });
 const calls = (...ids: string[]): ChatMessage => ({

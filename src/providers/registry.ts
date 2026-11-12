@@ -1,7 +1,9 @@
-import type { ClaudeConfig } from "../config.ts";
+import type { ClaudeConfig, CodexConfig } from "../config.ts";
 import { log } from "../log.ts";
-import { fetchClaudeUsage, type ProviderUsage, type UsageSource } from "./claude/usage.ts";
-import type { ProviderEntry, ProviderStore } from "./store.ts";
+import { fetchClaudeUsage } from "./claude/usage.ts";
+import { fetchCodexUsage } from "./codex/usage.ts";
+import type { ProviderUsage } from "./usage.ts";
+import type { ProviderEntry, ProviderStore, ProviderType } from "./store.ts";
 
 const USAGE_CACHE_MS = 60_000;
 /** How long to avoid a provider after a rate limit that did not say when it resets. */
@@ -38,6 +40,17 @@ export interface ProviderStatus {
 
 export type FailureKind = "rate_limit" | "auth";
 
+/** Reads one login's account and plan usage. */
+export type UsageSource = (entry: ProviderEntry) => Promise<ProviderUsage>;
+
+/** The base settings each provider type's logins inherit. */
+export interface BaseConfigs {
+  claude: ClaudeConfig;
+  codex: CodexConfig;
+}
+
+const PRODUCT: Record<ProviderType, string> = { claude: "Claude Code", codex: "Codex" };
+
 export interface TurnTokens {
   prompt: number;
   completion: number;
@@ -50,35 +63,44 @@ export interface TurnTokens {
  */
 export class ProviderRegistry {
   readonly store: ProviderStore;
-  private readonly base: ClaudeConfig;
+  private readonly base: BaseConfigs;
   private readonly fetchUsage: UsageSource;
   private readonly runtime = new Map<string, Runtime>();
   private readonly now: () => number;
 
   constructor(
     store: ProviderStore,
-    base: ClaudeConfig,
+    base: BaseConfigs,
     options: { fetchUsage?: UsageSource; now?: () => number } = {},
   ) {
     this.store = store;
     this.base = base;
-    this.fetchUsage = options.fetchUsage ?? fetchClaudeUsage;
+    this.fetchUsage = options.fetchUsage ?? ((entry) => this.readUsage(entry));
     this.now = options.now ?? Date.now;
   }
 
   /** Claude Code settings for one provider: the shared config plus its own login directory. */
   claudeConfig(entry: ProviderEntry): ClaudeConfig {
-    if (entry.configDir === undefined) return this.base;
-    return { ...this.base, env: { ...this.base.env, CLAUDE_CONFIG_DIR: entry.configDir } };
+    const { claude } = this.base;
+    if (entry.configDir === undefined) return claude;
+    return { ...claude, env: { ...claude.env, CLAUDE_CONFIG_DIR: entry.configDir } };
+  }
+
+  /** Codex settings for one provider: the shared config plus its own CODEX_HOME. */
+  codexConfig(entry: ProviderEntry): CodexConfig {
+    const { codex } = this.base;
+    if (entry.configDir === undefined) return codex;
+    return { ...codex, env: { ...codex.env, CODEX_HOME: entry.configDir } };
   }
 
   /**
-   * The provider that should serve a new conversation: the first enabled one in
+   * The login that should serve a new conversation: the first enabled one in
    * priority order that is not cooling down. When every candidate is cooling
    * down, the one whose limit lifts soonest, so a request still gets a real answer.
+   * `type` limits the choice to logins of one provider type.
    */
-  pick(exclude: ReadonlySet<string> = new Set()): ProviderEntry | undefined {
-    const candidates = this.store.enabled().filter((e) => !exclude.has(e.id));
+  pick(exclude: ReadonlySet<string> = new Set(), type?: ProviderType): ProviderEntry | undefined {
+    const candidates = this.store.enabled(type).filter((e) => !exclude.has(e.id));
     const ready = candidates.find((e) => this.health(e) === "ready");
     if (ready) return ready;
     return candidates
@@ -141,7 +163,7 @@ export class ProviderRegistry {
     if (!options.force && rt.usage && this.now() - rt.usage.fetchedAt < USAGE_CACHE_MS) {
       return rt.usage;
     }
-    rt.inflight ??= this.fetchUsage(this.claudeConfig(entry)).finally(() => {
+    rt.inflight ??= this.fetchUsage(entry).finally(() => {
       rt.inflight = undefined;
     });
     const usage = await rt.inflight;
@@ -158,7 +180,8 @@ export class ProviderRegistry {
   async verify(id: string): Promise<{ ok: boolean; message: string; usage: ProviderUsage }> {
     const usage = await this.usage(id, { force: true });
     if (usage.account === undefined) {
-      return { ok: false, message: usage.error ?? "Claude Code did not report an account.", usage };
+      const product = PRODUCT[this.store.get(id)?.type ?? "claude"];
+      return { ok: false, message: usage.error ?? `${product} did not report an account.`, usage };
     }
     const who = usage.account.email ?? usage.account.organization;
     if (who === undefined && usage.account.plan === undefined && !usage.account.billedToApi) {
@@ -171,6 +194,12 @@ export class ProviderRegistry {
     this.markHealthy(id);
     const plan = usage.account.plan ? ` (${usage.account.plan})` : "";
     return { ok: true, message: `Logged in${who ? ` as ${who}` : ""}${plan}.`, usage };
+  }
+
+  private readUsage(entry: ProviderEntry): Promise<ProviderUsage> {
+    return entry.type === "codex"
+      ? fetchCodexUsage(this.codexConfig(entry))
+      : fetchClaudeUsage(this.claudeConfig(entry));
   }
 
   private health(entry: ProviderEntry): ProviderHealth {

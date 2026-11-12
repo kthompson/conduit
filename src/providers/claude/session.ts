@@ -1,76 +1,36 @@
 import {
   query,
-  type EffortLevel,
-  type Options,
   type Query,
   type SDKMessage,
   type SDKPartialAssistantMessage,
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { Channel } from "../../channel.ts";
-import type { ClaudeConfig } from "../../config.ts";
 import type { Trace } from "../../capture/recorder.ts";
-import type { ChatMessage, FinishReason, FunctionTool, Usage } from "../../openai/types.ts";
 import { log } from "../../log.ts";
+import type { ToolResultContent, UserBlock } from "../conversation.ts";
+import { classifyFailure as classify } from "../failure.ts";
+import { BaseSession } from "../session.ts";
 import type { TurnEvent, TurnFailure } from "../types.ts";
-import { assistantFingerprint, type ToolResultContent, type UserBlock } from "./conversation.ts";
-import { buildSeedEntries, scratchConfigDir, SeedStore } from "./seed.ts";
-import { BRIDGE_SERVER, ToolBridge } from "./toolBridge.ts";
+import { buildOptions, resumeOptions, type SessionOptions } from "./options.ts";
+import { ToolBridge } from "./toolBridge.ts";
 
-const DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant.";
-const EFFORTS = new Set(["low", "medium", "high", "xhigh", "max"]);
-
-export type SessionState = "busy" | "awaiting_tools" | "idle" | "closed";
-
-export interface SessionOptions {
-  key: string;
-  /** Which configured provider (login) this process runs under. */
-  providerId: string;
-  model: string;
-  effort: string | undefined;
-  system: string;
-  tools: FunctionTool[];
-  config: ClaudeConfig;
-  /** Earlier conversation to resume as real turns; empty or omitted for a fresh session. */
-  history?: ChatMessage[];
-  /** Receives the real context window and output cap Claude Code reports after a turn. */
-  onLimits?: (model: string, limits: { contextWindow: number; maxOutputTokens: number }) => void;
-}
-
-interface ActiveTurn {
-  events: Channel<TurnEvent>;
-  trace: Trace;
-  /** Fingerprints of the request messages this turn answers; committed when it finishes. */
-  incoming: string[];
-  text: string;
-  toolCalls: Array<{ id: string; name: string }>;
-  blockToTool: Map<number, number>;
-  stopReason: string | null;
-  usage: { input: number; cacheRead: number; cacheWrite: number; output: number };
-  streamed: boolean;
-}
+export type { SessionOptions } from "./options.ts";
 
 /**
- * One live Claude Code process holding one conversation. Turns arrive as
- * separate HTTP requests; the process and its prompt cache stay warm between
- * them, including across a client-side tool round trip.
+ * One live Claude Code process holding one conversation. The turn lifecycle
+ * lives in `BaseSession`; this class translates Claude Code's stream into it
+ * and bridges the client's tools through an in-process MCP server.
  */
-export class ClaudeSession {
-  readonly id = crypto.randomUUID().slice(0, 8);
-  readonly key: string;
-  readonly providerId: string;
-  readonly model: string;
-  state: SessionState = "idle";
-  lastUsed = Date.now();
-  /** Fingerprints of every conversation message Claude has seen, in order. */
-  readonly transcript: string[] = [];
-  /** Tool calls from the last turn that the client still has to answer. */
-  pendingToolIds: string[] = [];
+export class ClaudeSession extends BaseSession {
+  protected readonly label = "Claude";
 
   private readonly input = new Channel<SDKUserMessage>();
   private readonly bridge: ToolBridge;
   private readonly query: Query;
-  private turn: ActiveTurn | undefined;
+  /** Which tool call each open content block belongs to, by block index. */
+  private blockToTool = new Map<number, number>();
+  private stopReason: string | null = null;
   /** The finished turn's `result` message is still to come and belongs to no turn. */
   private awaitingResult = false;
   /** What Claude Code last said about why requests are failing, used to classify a failed turn. */
@@ -78,23 +38,20 @@ export class ClaudeSession {
     code: undefined,
     resetsAt: undefined,
   };
-  private readonly onClose: (session: ClaudeSession) => void;
 
   private readonly onLimits: SessionOptions["onLimits"];
   /** Removes the scratch config dir of a resumed session. */
   private cleanup: (() => void) | undefined;
 
   constructor(options: SessionOptions, onClose: (session: ClaudeSession) => void) {
-    this.key = options.key;
-    this.providerId = options.providerId;
-    this.model = options.model;
-    this.onClose = onClose;
+    super(options, onClose);
     this.onLimits = options.onLimits;
     this.bridge = new ToolBridge(options.tools);
-    const resume = this.seed(options);
+    const resume = resumeOptions(options, this.bridge);
+    this.cleanup = resume.cleanup;
     this.query = query({
       prompt: this.input,
-      options: { ...buildOptions(options, this.bridge), ...resume },
+      options: { ...buildOptions(options, this.bridge), ...resume.options },
     });
     void this.pump();
   }
@@ -116,97 +73,24 @@ export class ClaudeSession {
     return events;
   }
 
-  /** Resumes a turn that stopped for tool calls by handing Claude the client's results. */
-  sendToolResults(
-    results: Array<{ id: string; content: ToolResultContent[] }>,
-    incoming: string[],
-    trace: Trace,
-    signal: AbortSignal,
-  ): AsyncIterable<TurnEvent> {
-    const events = this.begin(incoming, trace, signal);
-    const answered = new Set(results.map((r) => r.id));
-    for (const r of results) this.bridge.deliver(r.id, r.content);
-    for (const id of this.pendingToolIds) {
-      if (!answered.has(id)) {
-        this.bridge.deliver(id, [
-          { type: "text", text: "The client did not return a result for this tool call." },
-        ]);
-      }
-    }
-    this.pendingToolIds = [];
-    return events;
+  protected deliverResult(callId: string, content: ToolResultContent[]): void {
+    this.bridge.deliver(callId, content);
   }
 
-  close(reason: string): void {
-    if (this.state === "closed") return;
-    this.state = "closed";
-    log.debug("claude session closed", { session: this.id, reason });
+  protected failureFor(reason: string): TurnFailure | undefined {
+    return classifyFailure(this.lastError.code, reason, this.lastError.resetsAt);
+  }
+
+  protected teardown(reason: string): void {
     this.bridge.cancelAll(`Session closed: ${reason}`);
-    if (this.turn) {
-      const failure = classifyFailure(this.lastError.code, reason, this.lastError.resetsAt);
-      this.endTurn({
-        type: "error",
-        message: `Claude session closed: ${reason}`,
-        ...(failure ? { failure } : {}),
-      });
-    }
     this.input.end();
     this.query.close();
     this.cleanup?.();
-    this.onClose(this);
   }
 
-  /** Options that resume `history` as real turns instead of starting empty. */
-  private seed(options: SessionOptions): Partial<Options> {
-    if (!options.history || options.history.length === 0) return {};
-    const sessionId = crypto.randomUUID();
-    const entries = buildSeedEntries({
-      sessionId,
-      cwd: options.config.cwd,
-      model: options.model,
-      history: options.history,
-      toolName: (name) => this.bridge.claudeName(name),
-    });
-    const scratch = scratchConfigDir(options.config.env.CLAUDE_CONFIG_DIR);
-    this.cleanup = scratch.remove;
-    return {
-      resume: sessionId,
-      sessionStore: new SeedStore(sessionId, entries),
-      persistSession: true,
-      env: { ...buildEnv(options.config), CLAUDE_CONFIG_DIR: scratch.dir },
-    };
-  }
-
-  private begin(incoming: string[], trace: Trace, signal: AbortSignal): AsyncIterable<TurnEvent> {
-    if (this.turn) throw new Error("session already has an active turn");
-    this.state = "busy";
-    this.lastUsed = Date.now();
-    const events = new Channel<TurnEvent>();
-    this.turn = {
-      events,
-      trace,
-      incoming,
-      text: "",
-      toolCalls: [],
-      blockToTool: new Map(),
-      stopReason: null,
-      usage: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
-      streamed: false,
-    };
-    trace.note("claude session", {
-      session: this.id,
-      model: this.model,
-      transcriptLength: this.transcript.length,
-    });
-    signal.addEventListener(
-      "abort",
-      () => {
-        // The client's history no longer matches Claude's, so the process cannot be reused.
-        if (this.turn?.events === events) this.close("client disconnected mid-turn");
-      },
-      { once: true },
-    );
-    return events;
+  protected override onTurnBegin(): void {
+    this.blockToTool.clear();
+    this.stopReason = null;
   }
 
   private async pump(): Promise<void> {
@@ -264,8 +148,8 @@ export class ClaudeSession {
         turn.usage.input += u.input_tokens ?? 0;
         turn.usage.cacheRead += u.cache_read_input_tokens ?? 0;
         turn.usage.cacheWrite += u.cache_creation_input_tokens ?? 0;
-        turn.blockToTool.clear();
-        turn.stopReason = null;
+        this.blockToTool.clear();
+        this.stopReason = null;
         return;
       }
       case "content_block_start": {
@@ -274,21 +158,17 @@ export class ClaudeSession {
         const name = this.bridge.clientName(block.name);
         // A tool the client does not know is Claude Code's own business; it answers it and continues.
         if (name === undefined) return;
-        const index = turn.toolCalls.length;
-        turn.toolCalls.push({ id: block.id, name });
-        turn.blockToTool.set(event.index, index);
-        this.emit({ type: "tool_call_start", index, id: block.id, name });
+        this.blockToTool.set(event.index, this.startToolCall(block.id, name));
         return;
       }
       case "content_block_delta": {
         const delta = event.delta;
         if (delta.type === "text_delta") {
-          turn.text += delta.text;
           this.emit({ type: "text", delta: delta.text });
         } else if (delta.type === "thinking_delta") {
           this.emit({ type: "reasoning", delta: delta.thinking });
         } else if (delta.type === "input_json_delta") {
-          const index = turn.blockToTool.get(event.index);
+          const index = this.blockToTool.get(event.index);
           if (index !== undefined && delta.partial_json.length > 0) {
             this.emit({ type: "tool_call_args", index, delta: delta.partial_json });
           }
@@ -296,21 +176,21 @@ export class ClaudeSession {
         return;
       }
       case "message_delta":
-        turn.stopReason = event.delta.stop_reason ?? null;
+        this.stopReason = event.delta.stop_reason ?? null;
         turn.usage.output += event.usage?.output_tokens ?? 0;
         return;
       case "message_stop":
-        return this.handleMessageStop(turn);
+        return this.handleMessageStop(turn.toolCalls.length);
       default:
         return;
     }
   }
 
-  private handleMessageStop(turn: ActiveTurn): void {
-    switch (turn.stopReason) {
+  private handleMessageStop(toolCalls: number): void {
+    switch (this.stopReason) {
       case "tool_use":
         // Only calls for client tools end the HTTP turn; Claude Code runs anything else itself.
-        if (turn.toolCalls.length > 0) this.finish("tool_calls");
+        if (toolCalls > 0) this.finish("tool_calls");
         return;
       case "end_turn":
       case "stop_sequence":
@@ -353,40 +233,14 @@ export class ClaudeSession {
           ? result.result
           : (result.errors ?? []).join("; ") || result.subtype;
       const message = detail || "Claude Code reported an error.";
-      const failure = classifyFailure(this.lastError.code, message, this.lastError.resetsAt);
-      this.endTurn({ type: "error", message, ...(failure ? { failure } : {}) });
-      this.close("turn failed");
-      return;
+      return this.fail(
+        message,
+        classifyFailure(this.lastError.code, message, this.lastError.resetsAt),
+      );
     }
     // A turn that produced no stream events (rare) still has its text on the result.
     if (!turn.streamed && result.result) this.emit({ type: "text", delta: result.result });
     this.finish("stop");
-  }
-
-  private emit(event: TurnEvent): void {
-    const turn = this.turn;
-    if (!turn) return;
-    turn.streamed = true;
-    turn.events.push(event);
-  }
-
-  private finish(reason: FinishReason): void {
-    const turn = this.turn;
-    if (!turn) return;
-    const ids = reason === "tool_calls" ? turn.toolCalls.map((c) => c.id) : [];
-    this.transcript.push(...turn.incoming, assistantFingerprint(turn.text, ids));
-    this.pendingToolIds = ids;
-    this.state = reason === "tool_calls" ? "awaiting_tools" : "idle";
-    this.lastUsed = Date.now();
-    this.endTurn({ type: "done", finishReason: reason, usage: toUsage(turn.usage) });
-  }
-
-  private endTurn(final: TurnEvent): void {
-    const turn = this.turn;
-    if (!turn) return;
-    this.turn = undefined;
-    turn.events.push(final);
-    turn.events.end();
   }
 }
 
@@ -404,82 +258,7 @@ export function classifyFailure(
   message: string,
   resetsAt?: number,
 ): TurnFailure | undefined {
-  if (code === "rate_limit" || /rate.?limit|usage limit|limit reached|\b429\b/i.test(message)) {
-    return { kind: "rate_limit", ...(resetsAt === undefined ? {} : { resetsAt }) };
-  }
-  if (
-    (code !== undefined && AUTH_ERRORS.has(code)) ||
-    /not logged in|\/login|authenticat|invalid api key|unauthorized|\b401\b|credentials/i.test(
-      message,
-    )
-  ) {
-    return { kind: "auth" };
-  }
-  return undefined;
-}
-
-function buildEnv(config: ClaudeConfig): Record<string, string | undefined> {
-  const env: Record<string, string | undefined> = {
-    ...process.env,
-    ...config.env,
-    CLAUDE_AGENT_SDK_CLIENT_APP: "conduit/0.1.0",
-  };
-  if (config.stripApiKey) delete env.ANTHROPIC_API_KEY;
-  return env;
-}
-
-function buildOptions(options: SessionOptions, bridge: ToolBridge): Options {
-  const { config } = options;
-  const env = buildEnv(config);
-
-  let effort: EffortLevel | undefined;
-  if (options.effort !== undefined) {
-    if (EFFORTS.has(options.effort)) effort = options.effort as EffortLevel;
-    else log.warn("ignoring unknown effort", { effort: options.effort });
-  }
-
-  return {
-    model: options.model,
-    systemPrompt: options.system.trim().length > 0 ? options.system : DEFAULT_SYSTEM_PROMPT,
-    // Claude acts as a model here: the client owns and runs every tool.
-    tools: [],
-    ...(options.tools.length > 0
-      ? {
-          mcpServers: {
-            [BRIDGE_SERVER]: {
-              type: "sdk" as const,
-              name: BRIDGE_SERVER,
-              instance: bridge.server,
-              timeout: config.toolTimeoutSeconds * 1000,
-            },
-          },
-        }
-      : {}),
-    strictMcpConfig: true,
-    settingSources: config.settingSources,
-    permissionMode: "bypassPermissions",
-    allowDangerouslySkipPermissions: true,
-    persistSession: false,
-    includePartialMessages: true,
-    cwd: config.cwd,
-    env,
-    ...(effort === undefined ? {} : { effort }),
-    ...(config.reasoning === "none"
-      ? {}
-      : { thinking: { type: "adaptive", display: "summarized" } }),
-    ...(config.binary === undefined ? {} : { pathToClaudeCodeExecutable: config.binary }),
-    stderr: (data) => log.debug("claude stderr", { data: data.trimEnd() }),
-  };
-}
-
-function toUsage(u: ActiveTurn["usage"]): Usage {
-  const prompt = u.input + u.cacheRead + u.cacheWrite;
-  return {
-    prompt_tokens: prompt,
-    completion_tokens: u.output,
-    total_tokens: prompt + u.output,
-    prompt_tokens_details: { cached_tokens: u.cacheRead },
-  };
+  return classify(code, message, { resetsAt, authCodes: AUTH_ERRORS });
 }
 
 type StreamEvent = SDKPartialAssistantMessage["event"];

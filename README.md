@@ -1,18 +1,21 @@
 # conduit
 
-An OpenAI-compatible endpoint backed by your agent subscription. Point a harness you like
+An OpenAI-compatible endpoint backed by your agent subscriptions. Point a harness you like
 (GitHub Copilot, or anything that speaks Chat Completions) at conduit, and Claude answers
-through your Claude Code login.
+through your Claude Code login and, if you turn it on, GPT models answer through your Codex
+(ChatGPT) login. Each request goes to the provider that owns the model it names.
 
 ```
-harness ──/v1/chat/completions──▶ conduit ──Agent SDK──▶ Claude Code (your login) ──▶ Claude
-   ▲                                  │
+                                   ┌──Agent SDK────▶ Claude Code (your login) ──▶ Claude
+harness ──/v1/chat/completions──▶ conduit
+   ▲                               └──app-server──▶ Codex (your login) ───────▶ GPT
    └──────── tool_calls / results ◀───┘
 ```
 
-Claude acts as a **model** here, not an agent. Claude Code's built-in tools are turned off.
-The harness's tools are exposed to Claude through an in-process MCP server, and every
-tool call goes back to the harness as an ordinary `tool_calls` response for it to run.
+The agent acts as a **model** here, not an agent. Claude Code's and Codex's built-in tools
+are turned off or contained. The harness's tools are exposed to the model (to Claude through an
+in-process MCP server, to Codex as dynamic tools), and every tool call goes back to the
+harness as an ordinary `tool_calls` response for it to run.
 
 ## Features
 
@@ -20,17 +23,22 @@ tool call goes back to the harness as an ordinary `tool_calls` response for it t
   optional usage reporting), `GET /v1/models`, and `GET /health`. The `/v1` prefix is optional.
 - **Subscription-backed.** Requests run through your own Claude Code login; the Anthropic API
   key is stripped from the environment so usage goes to your plan.
+- **Two providers, one endpoint.** Claude (Claude Code) and Codex (`codex app-server`).
+  `/v1/models` lists both and each model id is served by the provider that owns it. Both share
+  the same session handling, failover between logins and usage tracking.
 - **Harness tools, not Claude's.** Claude Code's built-in tools are disabled. The harness's
   tools reach Claude over an in-process MCP server and come back as standard `tool_calls`.
-- **Warm sessions.** One live Claude Code process per conversation, so tool round trips and
+- **Warm sessions.** One live agent process per conversation, so tool round trips and
   follow-up turns keep the prompt cache warm. Idle sessions expire and the number of live
   processes is capped.
 - **Resumable history.** After a restart, model switch or edited history, earlier turns are
   replayed into a fresh process as real turns, so the conversation carries on.
-- **Any Claude model, with effort control.** Use full ids or aliases (`opus`, `sonnet`,
-  `haiku`). Set effort per request, with a `:effort` model suffix, or in config.
+- **Any model, with effort control.** Claude full ids or aliases (`opus`, `sonnet`, `haiku`) and
+  Codex models such as `gpt-5.6-terra`. Set effort per request, with a `:effort` model suffix, or in config.
 - **Streamed thinking.** Returned as `reasoning_content`, inline `<think>` tags, or dropped.
 - **Isolated by default.** Your CLAUDE.md, hooks, plugins and MCP servers stay out of the model.
+  Codex runs against a throwaway `CODEX_HOME` that holds only your login, so its config, MCP
+  servers and plugins stay out too.
 - **Optional API key.** Set `server.api_key` to require a bearer token on every request.
 - **Capture and mock mode.** Record any client's traffic as JSON, or test a harness against a
   free mock model.
@@ -46,7 +54,8 @@ node src/cli.ts serve         # http://127.0.0.1:4100
 ```
 
 Requires Node 24+ (conduit runs its TypeScript directly) and a Claude Code login: run
-`claude` once and sign in.
+`claude` once and sign in. For Codex, install the [Codex CLI](https://github.com/openai/codex),
+run `codex login`, then add a Codex provider in the web UI (below). There is nothing to enable in config.
 
 ```bash
 curl -N http://127.0.0.1:4100/v1/chat/completions -H 'content-type: application/json' \
@@ -72,18 +81,19 @@ carry `/v1` or not. For other surfaces, such as Copilot Desktop, run `conduit ca
 
 | Command                 | What it does                                                |
 | ----------------------- | ----------------------------------------------------------- |
-| `conduit serve`         | Serve Chat Completions backed by Claude Code                |
+| `conduit serve`         | Serve Chat Completions backed by Claude Code (and Codex)    |
 | `conduit capture`       | Serve the **mock** model and record every exchange to JSON  |
-| `conduit models`        | List the models your login can use                          |
-| `conduit doctor`        | Check Claude Code, auth source and models                   |
+| `conduit models`        | List the models your logins can use                         |
+| `conduit doctor`        | Check Claude Code and Codex, auth source and models         |
 | `conduit init`          | Write the example config to `~/.config/conduit/config.toml` |
 | `conduit setup copilot` | Register conduit's models in Copilot Desktop (see below)    |
 
-Flags: `-c/--config`, `-p/--port`, `-H/--host`, `--provider claude|mock`, `--capture [dir]`, `-v`.
+Flags: `-c/--config`, `-p/--port`, `-H/--host`, `--provider claude|codex|mock`, `--capture [dir]`, `-v`.
+`--provider` only decides where model ids no provider recognizes go.
 
 ### Capture and test mode
 
-`conduit capture` swaps Claude for a mock model and writes one JSON file per HTTP
+`conduit capture` swaps the real providers for a mock model and writes one JSON file per HTTP
 exchange, holding the request (secrets redacted), the response chunks, and timing. Point
 a harness at it to learn its wire behavior for free. Requests to routes conduit does not
 implement are recorded too, so you can see what a client probes for.
@@ -92,18 +102,23 @@ The mock reports what it received (roles, system prompt size, tools, params). Se
 `/tool <name> {json}` to make it call one of the harness's tools, and it reports the
 results that come back.
 
-`conduit serve --capture` records real Claude traffic the same way, and adds the raw
-Agent SDK messages under `upstream`.
+`conduit serve --capture` records real traffic the same way, and adds the raw Agent SDK
+messages (or Codex notifications) under `upstream`.
 
 Captures go to `~/.local/state/conduit/captures/<timestamp>/` by default.
 
 ## Providers and the web UI
 
-A **provider** is one Claude Code login. conduit can hold several and tries them in the
-priority order you set: a new conversation goes to the first enabled provider that is not
-rate limited or logged out. If a provider fails that way before answering, conduit marks it
-(for the length of the limit, when Claude says) and retries on the next. A conversation
-stays on the provider it started on. Your existing login is always there as "Default login".
+A **provider** is one login of one type: a Claude Code login or a Codex login. conduit can
+hold several of each and tries them in the priority order you set: a new conversation goes to
+the first enabled provider of the right type that is not rate limited or logged out. If a
+provider fails that way before answering, conduit marks it (for the length of the limit, when
+the agent says) and retries on the next one of the same type. A conversation stays on the
+provider it started on. Your existing Claude login is always there as "Default login", and
+Codex logins exist once you add them: pick type Codex, and enter `~/.codex` as the config
+directory to reuse the login you already have. Codex needs no restart and no config; its models
+appear in `/v1/models` as soon as a Codex login is added. A Claude login never stands in for
+Codex or the other way round.
 
 ```bash
 node src/cli.ts serve         # UI at http://127.0.0.1:4100/ui/
@@ -111,9 +126,10 @@ node src/cli.ts serve         # UI at http://127.0.0.1:4100/ui/
 
 The UI lists each provider with its account, plan usage (5-hour and weekly windows, resets,
 extra usage), and this session's request and token counts. You can reorder, enable or
-disable, verify and remove providers, and add more. Adding one takes a name and a config
-directory (default `~/.config/conduit/accounts/<name>`); conduit creates it and shows the
-`CLAUDE_CONFIG_DIR=… claude /login` command to run, then **Verify login** checks it.
+disable, verify and remove providers, and add more. Adding one takes a type, a name and a
+config directory (default `~/.config/conduit/accounts/<name>`); conduit creates it and shows
+the `CLAUDE_CONFIG_DIR=… claude /login` or `CODEX_HOME=… codex login` command to run, then
+**Verify login** checks it.
 Providers are stored in `~/.local/state/conduit/providers.json`.
 
 With `server.api_key` set, the UI asks for it once and keeps a signed `HttpOnly` cookie.
@@ -123,31 +139,60 @@ header switches to light or system.
 
 ## Models and effort
 
-- `/v1/models` lists what your login offers, asked live from Claude Code.
-- Any id Claude Code accepts works: full ids (`claude-opus-5-5`) or aliases (`opus`, `sonnet`, `haiku`).
+- `/v1/models` lists what your logins offer, asked live from Claude Code and from Codex's
+  `model/list`. If one provider cannot answer, the others are still listed.
+- A request goes to the provider that owns its model id: `claude-*` ids and the aliases
+  `opus`, `sonnet`, `haiku` and `fable` to Claude; `gpt-*`, `o<N>` and `codex*` ids (and any id
+  Codex listed) to Codex; `mock` to the mock model. Anything else goes to `default_provider`.
+- Any id Claude Code accepts works: full ids (`claude-opus-5-5`) or aliases. Codex models come
+  from its own list (`gpt-5.6-terra`, ...).
 - Effort comes from `reasoning_effort` on the request, a `:effort` suffix on the model
-  (`claude-opus-5-5:high`, handy when the harness only lets you set a model name), or
-  `providers.claude.effort`.
+  (`claude-opus-5-5:high`, `gpt-5.6-terra:ultra`, handy when the harness only lets you set a model
+  name), or `providers.<name>.effort`. An effort a Codex model does not support is dropped.
 - Thinking streams as `reasoning_content` by default. Set `reasoning = "think_tags"` or `"none"` to change that.
 
-## How conversations map onto Claude Code
+## How conversations map onto live sessions
 
-Chat Completions is stateless, but a Claude Code process is not. conduit keeps one live
-process per conversation and recognizes each new request as a continuation of it:
+Chat Completions is stateless, but a Claude Code or Codex process is not. conduit keeps one
+live process per conversation and recognizes each new request as a continuation of it. Both
+providers share this logic; only how the process is driven differs:
 
-- **Tool round trip.** When Claude calls a harness tool, conduit ends the HTTP response
-  with `finish_reason: "tool_calls"` while Claude Code waits inside the MCP call. The next
-  request carries the `tool` results. conduit matches them by `tool_call_id` (Claude's own
-  `toolu_…` id) and Claude continues in the same process, with the prompt cache warm.
+- **Tool round trip.** When the model calls a harness tool, conduit ends the HTTP response
+  with `finish_reason: "tool_calls"` while the agent waits for the answer (Claude Code inside
+  the MCP call, Codex inside its `item/tool/call` request). The next request carries the `tool`
+  results. conduit matches them by `tool_call_id` (the agent's own id) and the model continues
+  in the same process, with the prompt cache warm. Codex's calls can arrive a moment apart, so
+  conduit waits `providers.codex.tool_settle_ms` for siblings before ending the response.
 - **Follow-up turn.** When a request's history extends a session's, only the new user
   message is sent.
 - **Anything else** (a restart, a model switch, edited history) starts a fresh process.
-  The earlier history is resumed as real turns (user text, assistant text, `tool_use` and
-  `tool_result` blocks), so the conversation carries on and a restarted server picks up where
-  it left off. Thinking is not replayed.
+  The earlier history is resumed as real turns (for Claude: user text, assistant text,
+  `tool_use` and `tool_result` blocks through the SDK's session store; for Codex: Responses
+  items through `thread/inject_items`), so the conversation carries on and a restarted server
+  picks up where it left off. Thinking is not replayed.
 
 A session is identified by system prompt, tool set, model and effort. Sessions close
 after `session_idle_seconds`, and a client that disconnects mid-turn closes its session.
+
+## Codex
+
+Codex is on as soon as you add a Codex login in the web UI. Until then it costs nothing and
+starts no process. conduit runs `codex app-server` (JSON-RPC
+over stdio, a Codex CLI you have installed) and drives one thread per conversation:
+
+- The harness's tools are registered as Codex _dynamic tools_. Codex asks for each call and waits,
+  exactly like the Claude MCP bridge, so the harness runs the tool and conduit hands the result back.
+- Codex acts as a model. The process runs against a throwaway `CODEX_HOME` with only your
+  `auth.json` linked in and a minimal generated `config.toml` that turns off its shell, browser,
+  plugins, goals, memories and sub-agent features. Threads start with no environment, a read-only
+  sandbox and approvals set to `never`, and any approval or user-input request is declined. Codex
+  still advertises its code runner (`exec`, `wait`) and agent-collaboration tools to the model;
+  with no environment they cannot reach your machine, and conduit logs a warning if one is used.
+- `OPENAI_API_KEY` is removed from the environment so usage goes to your ChatGPT plan.
+- Plan usage (5-hour, weekly or monthly windows) comes from `account/rateLimits/read`, and a
+  `usageLimitExceeded` error marks that login rate limited until the window resets.
+- Codex's `item/tool/call` and `dynamicTools` are still marked experimental by Codex. conduit was
+  built against Codex CLI 0.160.
 
 ## Config
 
@@ -155,24 +200,30 @@ TOML, looked up at `--config`, then `$CONDUIT_CONFIG`, then `./conduit.toml`, th
 `~/.config/conduit/config.toml`. See [conduit.example.toml](conduit.example.toml).
 By default Claude runs isolated (`setting_sources = []`), so your CLAUDE.md, hooks,
 plugins and MCP servers stay out of the model. `ANTHROPIC_API_KEY` is removed from Claude
-Code's environment so usage goes to the subscription.
+Code's environment so usage goes to the subscription. `[providers.claude]` and
+`[providers.codex]` share the same keys for session limits, effort, context window and
+reasoning output; Codex adds `tool_settle_ms`. Logins themselves are managed in the web UI.
 
 ## Development
 
 ```bash
-pnpm test                          # unit + mock-server tests (no Claude calls)
+pnpm test                          # unit + mock-server tests (no Claude or Codex calls; Codex runs against a fake app-server)
 pnpm typecheck
 node scripts/e2e.ts http://127.0.0.1:4100/v1   # live tool round trip against a running server (uses your quota)
 ```
+
+To add another agent (Grok, Copilot, ...), follow [docs/adding-a-provider.md](docs/adding-a-provider.md).
 
 Layout:
 
 - `src/server.ts`: HTTP routing, auth, model routing
 - `src/openai/`: Chat Completions wire types and SSE/JSON output
-- `src/providers/claude/`: sessions (`session.ts`), tool bridge (`toolBridge.ts`), and request matching plus cold start (`provider.ts`, `conversation.ts`)
+- `src/providers/`: what every conversation-backed provider shares: the turn lifecycle (`session.ts`), the session pool and failover (`conversationProvider.ts`), request matching and cold start (`matching.ts`, `conversation.ts`), pending tool calls (`pendingTools.ts`), failure classification (`failure.ts`) and usage types (`usage.ts`)
+- `src/providers/claude/`: the Claude Code adapter: session (`session.ts`, `options.ts`), tool bridge (`toolBridge.ts`), history seed (`seed.ts`), model limits and usage
+- `src/providers/codex/`: the Codex adapter: app-server client (`appServer.ts`), session, scratch home (`home.ts`), history seed, models and usage
 - `src/providers/mock/`: the capture-mode model
 - `src/capture/`: the JSON recorder
-- `src/providers/`: provider entries (`store.ts`), priority routing and usage (`registry.ts`), Claude usage lookup (`claude/usage.ts`)
+- `src/providers/`: also provider entries (`store.ts`) and priority routing and usage (`registry.ts`)
 - `ui/`: the web UI (React Router, Tailwind, shadcn/ui, Conform + Zod), mounted by `src/ui.ts`
 
 The Claude integration follows patterns from t3code's Claude adapter (`reference/t3code`):
@@ -182,9 +233,9 @@ and its own orchestration layer, which is more machinery than a stateless HTTP f
 
 ## Terms
 
-conduit drives your own Claude Code install for your own use. Anthropic's terms restrict
-offering Claude.ai logins or subscription limits through third-party products, so don't
-expose a conduit instance to other people.
+conduit drives your own Claude Code and Codex installs for your own use. Anthropic's and
+OpenAI's terms restrict offering subscription logins or limits through third-party products,
+so don't expose a conduit instance to other people.
 
 ## Configure GitHub Copilot Desktop
 
@@ -195,4 +246,4 @@ conduit setup copilot            # dry run: prints what would change
 conduit setup copilot --write    # backs up ~/.copilot/data.db, then upserts a "Conduit" provider and its models
 ```
 
-Setup probes each model with one tiny turn to read its real context window and output cap (`--no-probe` skips this and uses built-in defaults). Each model's supported reasoning efforts (`low`, `medium`, `high`, `xhigh`, `max`, as reported by Claude Code) are written too, as a JSON array in `supported_reasoning_efforts`; pass `--no-efforts` to leave that column alone. A model with no efforts keeps whatever you set in Copilot's form. Quit Copilot Desktop before `--write`, and restart it afterwards. Context windows and output limits come from, in order: limits the running server learned from real turns on your login, then a built-in table of values measured through Claude Code (`src/providers/claude/limits.ts`). Claude Code's limits can differ from the API docs and from plan to plan, for example Opus 4.6 and Sonnet 4.6 stay at 200K without a `[1m]` suffix, so running `setup copilot` while `conduit serve` is up (and has served a turn) gives the most accurate numbers. Restart `conduit serve` after upgrading so it picks up new defaults.
+Setup probes each model with one tiny turn to read its real context window and output cap (`--no-probe` skips this and uses built-in defaults). Each model's supported reasoning efforts (`low`, `medium`, `high`, `xhigh`, `max`, as reported by Claude Code or Codex) are written too, as a JSON array in `supported_reasoning_efforts`; pass `--no-efforts` to leave that column alone. A model with no efforts keeps whatever you set in Copilot's form. Quit Copilot Desktop before `--write`, and restart it afterwards. Context windows and output limits come from, in order: limits the running server learned from real turns on your login, then a built-in table of values measured through Claude Code (`src/providers/claude/limits.ts`). Claude Code's limits can differ from the API docs and from plan to plan, for example Opus 4.6 and Sonnet 4.6 stay at 200K without a `[1m]` suffix, so running `setup copilot` while `conduit serve` is up (and has served a turn) gives the most accurate numbers. Restart `conduit serve` after upgrading so it picks up new defaults.

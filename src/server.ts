@@ -8,7 +8,7 @@ import { errorBody, HttpError, type ChatCompletionRequest } from "./openai/types
 import type { ModelEntry, Provider } from "./providers/types.ts";
 
 const MAX_BODY_BYTES = 64 * 1024 * 1024;
-const EFFORT_SUFFIX = /^(.+?)[:@](low|medium|high|xhigh|max)$/;
+const EFFORT_SUFFIX = /^(.+?)[:@](low|medium|high|xhigh|max|ultra)$/;
 
 /** The web UI, mounted under /ui. */
 export interface UiMount {
@@ -41,8 +41,15 @@ export async function startServer(
     const suffix = EFFORT_SUFFIX.exec(model);
     const base = suffix?.[1] ?? model;
     const effort = suffix ? suffix[2] : undefined;
-    const name: ProviderName = base === "mock" ? "mock" : config.defaultProvider;
-    return { provider: need(name), upstream: base, effort };
+    return { provider: ownerOf(base), upstream: base, effort };
+  };
+
+  /** The provider that serves `model`; models nobody claims go to the default provider. */
+  const ownerOf = (model: string): Provider => {
+    for (const provider of Object.values(providers)) {
+      if (provider?.owns(model)) return provider;
+    }
+    return need(config.defaultProvider);
   };
 
   const need = (name: ProviderName): Provider => {
@@ -81,10 +88,10 @@ export async function startServer(
       authorize(req, config.server.apiKey);
 
       if (req.method === "GET" && path === "/models") {
-        return send(res, trace, 200, { object: "list", data: await listModels(config, providers) });
+        return send(res, trace, 200, { object: "list", data: await listModels(providers) });
       }
       if (req.method === "POST" && path === "/chat/completions") {
-        return await chat(req, res, trace, body, resolve, config);
+        return await chat(req, res, trace, body, resolve);
       }
       throw new HttpError(
         404,
@@ -139,7 +146,6 @@ async function chat(
   trace: Trace,
   body: unknown,
   resolve: (model: string) => Route,
-  config: Config,
 ) {
   const request = validateChat(body);
   const route = resolve(request.model);
@@ -148,7 +154,8 @@ async function chat(
     if (!res.writableFinished) aborter.abort();
   });
 
-  const effort = request.reasoning_effort ?? route.effort ?? config.claude.effort;
+  const { settings } = route.provider;
+  const effort = request.reasoning_effort ?? route.effort ?? settings.effort;
   log.info("chat", {
     model: request.model,
     provider: route.provider.name,
@@ -169,11 +176,11 @@ async function chat(
   if (request.stream) {
     await streamChat(res, request.model, events, {
       includeUsage: request.stream_options?.include_usage === true,
-      reasoning: config.claude.reasoning,
+      reasoning: settings.reasoning,
       trace,
     });
   } else {
-    const result = await collectChat(request.model, events, config.claude.reasoning);
+    const result = await collectChat(request.model, events, settings.reasoning);
     send(res, trace, result.status, result.body);
   }
 }
@@ -203,28 +210,33 @@ function validateChat(body: unknown): ChatCompletionRequest {
   return r as ChatCompletionRequest;
 }
 
-async function listModels(config: Config, providers: Partial<Record<ProviderName, Provider>>) {
+async function listModels(providers: Partial<Record<ProviderName, Provider>>) {
   const created = Math.floor(Date.now() / 1000);
   const seen = new Set<string>();
   const data: Array<Record<string, unknown>> = [];
-  const add = (id: string, ownedBy: string, extra: Partial<ModelEntry> = {}) => {
-    if (seen.has(id)) return;
-    seen.add(id);
-    const contextWindow = extra.contextWindow ?? config.claude.contextWindow;
+  const add = (provider: Provider, m: ModelEntry) => {
+    if (seen.has(m.id)) return;
+    seen.add(m.id);
+    const contextWindow = m.contextWindow ?? provider.settings.contextWindow;
     data.push({
-      id,
+      id: m.id,
       object: "model",
       created,
-      owned_by: ownedBy,
-      ...(extra.displayName ? { display_name: extra.displayName } : {}),
-      ...(extra.supportedEfforts ? { supported_reasoning_efforts: extra.supportedEfforts } : {}),
-      ...(extra.maxOutputTokens ? { max_output_tokens: extra.maxOutputTokens } : {}),
+      owned_by: m.ownedBy,
+      ...(m.displayName ? { display_name: m.displayName } : {}),
+      ...(m.supportedEfforts ? { supported_reasoning_efforts: m.supportedEfforts } : {}),
+      ...(m.maxOutputTokens ? { max_output_tokens: m.maxOutputTokens } : {}),
       ...(contextWindow ? { context_window: contextWindow, context_length: contextWindow } : {}),
     });
   };
   for (const provider of Object.values(providers)) {
     if (!provider) continue;
-    for (const m of await provider.listModels()) add(m.id, m.ownedBy, m);
+    try {
+      for (const m of await provider.listModels()) add(provider, m);
+    } catch (error) {
+      // One provider being unavailable must not hide the others' models.
+      log.warn("could not list models", { provider: provider.name, error: String(error) });
+    }
   }
   return data;
 }

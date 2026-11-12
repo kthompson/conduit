@@ -16,7 +16,7 @@ export function meta() {
 }
 
 const schema = z.object({
-  type: z.enum(["claude"]),
+  type: z.enum(["claude", "codex"]),
   name: z
     .string("Name is required")
     .trim()
@@ -89,6 +89,9 @@ export default function NewProvider({ actionData }: Route.ComponentProps) {
                 <option value="claude" className="bg-popover">
                   Claude (Claude Code login)
                 </option>
+                <option value="codex" className="bg-popover">
+                  Codex (ChatGPT login)
+                </option>
               </select>
             </Field>
             <Field
@@ -107,7 +110,7 @@ export default function NewProvider({ actionData }: Route.ComponentProps) {
             <Field
               label="Config directory"
               field={fields.configDir}
-              hint="Optional. Where this login is stored. Leave empty to use ~/.config/conduit/accounts/<name>."
+              hint="Optional. Where this login is stored (CLAUDE_CONFIG_DIR or CODEX_HOME). Leave empty to use ~/.config/conduit/accounts/<name>. To reuse a Codex login you already have, enter ~/.codex."
             >
               <Input
                 {...getInputProps(fields.configDir, { type: "text" })}

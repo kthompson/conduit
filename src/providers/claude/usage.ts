@@ -1,40 +1,9 @@
 import type { ClaudeConfig } from "../../config.ts";
+import { errorMessage, failedUsage, type ProviderAccount, type ProviderUsage } from "../usage.ts";
 import { openProbe } from "./probe.ts";
 
-export interface UsageWindow {
-  id: string;
-  label: string;
-  /** Share of the window used, 0-100. */
-  percent: number;
-  resetsAt: string | null;
-}
-
-export interface ProviderAccount {
-  email: string | undefined;
-  organization: string | undefined;
-  /** "pro", "max", "team", ... */
-  plan: string | undefined;
-  /** How Claude Code authenticated, in words. */
-  auth: string;
-  /** True when requests bill an API key instead of a subscription. */
-  billedToApi: boolean;
-}
-
-export interface ProviderUsage {
-  fetchedAt: number;
-  account: ProviderAccount | undefined;
-  windows: UsageWindow[];
-  extraUsage:
-    | { enabled: boolean; usedCredits: number | null; limit: number | null; currency: string }
-    | undefined;
-  /** Why account or usage could not be read, if it could not. */
-  error: string | undefined;
-}
-
-export type UsageSource = (config: ClaudeConfig) => Promise<ProviderUsage>;
-
 /** Asks a short-lived Claude Code process who is logged in and how much of the plan is used. */
-export const fetchClaudeUsage: UsageSource = async (config) => {
+export async function fetchClaudeUsage(config: ClaudeConfig): Promise<ProviderUsage> {
   const q = openProbe(config, { keepOpen: true });
   try {
     const info = await q.accountInfo();
@@ -95,18 +64,8 @@ export const fetchClaudeUsage: UsageSource = async (config) => {
     }
     return result;
   } catch (error) {
-    return {
-      fetchedAt: Date.now(),
-      account: undefined,
-      windows: [],
-      extraUsage: undefined,
-      error: errorMessage(error),
-    };
+    return failedUsage(error);
   } finally {
     q.close();
   }
-};
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
